@@ -9,34 +9,7 @@ bootloader, an operating system, a filesystem, a virtual machine, a graphical
 user interface, a command shell, persistent storage, applications, games,
 emulators, diagnostics, and its own package format.
 
-```text
-                    SageLang
-                       │
-                       ▼
-                 Sage Compiler
-                       │
-                       ▼
-                  Sage Bytecode
-                       │
-                       ▼
-                     SageVM
-                       │
-                       ▼
-                     SageOS
-              ┌─────────┼─────────┐
-              │         │         │
-           SageGUI   SageShell  Services
-              │         │         │
-              └─────────┼─────────┘
-                       │
-                    SageFS
-                       │
-                       ▼
-                    128 GB SD
-                       │
-                       ▼
-                  SagePocket HW
-```
+![SagePocket architecture](assets/SagePocket.png)
 
 ## Hardware
 

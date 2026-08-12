@@ -3370,3 +3370,51 @@ For implementation, I would start with **Phases 0–3 only**: repository → Sag
 [3]: https://www.waveshare.com/wiki/1.47inch_LCD_Module?utm_source=chatgpt.com "1.47inch LCD Module - Waveshare Wiki"
 [4]: https://www.raspberrypi.com/documentation/microcontrollers/microcontroller-chips.html?utm_source=chatgpt.com "Microcontroller chips - Raspberry Pi Documentation"
 [5]: https://www.waveshare.com/rp2350-lcd-1.47-a.htm?sku=30569&utm_source=chatgpt.com "RP2350 1.47inch Display Development Board, 172×320, 262K Color, Based On RP2350 Dual-core & Dual-architecture Microcontroller, 150MHz Running Frequency, With Colorful RGB LED | RP2350-Touch-AMOLED-1.43"
+
+---
+
+# Appendix: Verified Build Environment (2026-08-11)
+
+## Toolchain status (all verified end-to-end → .uf2)
+
+| Component | Location | Status |
+|---|---|---|
+| pico-sdk 2.1.0 | `SagePocket/.deps/pico-sdk` (git describe: 2.1.0) | ✓ |
+| pico_sdk_import.cmake | `SagePocket/pico_sdk_import.cmake` (copied from SDK) | ✓ |
+| ARM Cortex-M33 toolchain | system `arm-none-eabi-gcc` 14.2.1 (`15:14.2.rel1-1`) | ✓ |
+| RISC-V (Hazard3) toolchain | `/opt/riscv` — `riscv32-unknown-elf-gcc` 14.2.1 from raspberrypi/pico-sdk-tools v2.0.0-5 (`riscv-toolchain-14-x86_64-lin.tar.gz`); multilib includes `rv32imac_zicsr_zifencei_zba_zbb_zbkb_zbs/ilp32` | ✓ |
+| picotool | `/usr/local/bin/picotool` v2.0.0 | ✓ |
+
+- Add `/opt/riscv/bin` to PATH for RISC-V builds (already appended to `~/.bashrc`).
+- The RISC-V build is only needed for the Hazard3 firmware variant; ARM is the primary path.
+
+## Verified compile pipeline (hello.sage → hello.uf2)
+
+```
+sage --compile-pico hello.sage -o out --board pico2 --chip rp2350-arm \
+     --name hello --sdk SagePocket/.deps/pico-sdk
+sage --compile-pico hello.sage -o out --board pico2 --chip rp2350-riscv \
+     --name hello --sdk SagePocket/.deps/pico-sdk   # needs /opt/riscv/bin on PATH
+```
+
+Both targets produce `build/hello.uf2` (87,552 bytes each). pico-sdk 2.1.0 has no
+`waveshare_rp2350_lcd_1_47` board header, so verification used `--board pico2`;
+the Waveshare board definition will be a SagePocket board header (`boards/`) once
+needed. The compiler's `--compile-pico` finds `pico_sdk_import.cmake` by walking
+up from the CWD, so run it from the SagePocket repo root.
+
+## SageLang compiler changes for embedded targets
+
+`SageVM/.deps/SageLang/core/src/c/compiler.c` prelude is now embedded-aware via
+`#if !defined(PICO_ON_DEVICE)` guards (PICO_ON_DEVICE is set by pico-sdk builds):
+
+- Headers: embedded builds get `pico/stdlib.h` instead of `dlfcn.h`,
+  `semaphore.h`, `pthread.h`, `unistd.h`, `time.h`.
+- FFI (`sage_ffi_*`) already stubbed for non-host targets.
+- Semaphores: host uses POSIX `sem_*`; embedded no-op stubs.
+- Threads: host uses pthreads; embedded no-op stubs; `thread.sleep` maps to
+  pico `sleep_ms()`.
+- `sys.getenv` → nil on embedded; `sys.clock` → `to_ms_since_boot()/1000`.
+- `sage_ffi_sym`/`sage_ffi_sym_addr` → false/nil on embedded.
+- Host-only io (`fopen`-based) still compiles under newlib (returns NULL at
+  runtime on Pico; fine until SageFS provides a filesystem).
