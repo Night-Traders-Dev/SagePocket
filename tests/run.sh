@@ -49,7 +49,8 @@ old = '''#include <stdint.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
-#include "hardware/pio.h"'''
+#include "hardware/pio.h"
+#include "hardware/spi.h"'''
 new = '''#include <stdint.h>
 #include <math.h>
 #include <setjmp.h>
@@ -142,7 +143,7 @@ STUBHW
         check "sageboot host run stays in main loop" 0
     fi
 
-    for expect in "SageBoot" "Arch:" "Clock:" "UART0: PASS" "RGB LED: PASS" "Phase 1 bring-up complete"; do
+    for expect in "SageBoot" "Arch:" "Clock:" "UART0: PASS" "RGB LED: PASS" "LCD: ST7789V3 init FAIL" "SD: NOT AVAILABLE IN PHASE 2" "Phase 2 bring-up complete"; do
         if echo "$out" | grep -qF "$expect"; then
             check "sageboot output contains '$expect'" 0
         else
@@ -179,7 +180,7 @@ unit_tests() {
 compile_checks() {
     echo "== pico compile checks (ARM) =="
     local f dir name
-    for f in boot/sageboot.sage kernel/hal.sage; do
+    for f in boot/sageboot.sage kernel/hal.sage drivers/lcd/st7789v3.sage; do
         name="$(basename "$f" .sage)"
         if "$SAGE" --compile-pico "$f" -o "$SCRATCH/$name" \
                 --name "$name" --board "$BOARD" --chip rp2350-arm \

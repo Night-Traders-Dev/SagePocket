@@ -86,14 +86,46 @@ Buttons                 none (BOOT/RESET only)
 
 ```text
 Controller: ST7789V3
-Resolution: 172 × 320
-Interface:  4-wire SPI
-Color:      RGB565 initially
+Resolution: 172 × 320 (portrait panel)
+Interface:  4-wire SPI (SPI0)
+Color:      RGB565, BGR byte order
 ```
 
 The display is the primary graphical interface for SageOS. Waveshare documents
 RGB565 operation and provides both low-level LCD and LVGL examples, making
 partial-rendering demonstration code available as a bootstrap reference.
+
+**Verified driver configuration (Phase 2, `drivers/lcd/st7789v3.sage`):**
+
+```text
+SPI:      SPI0 master, mode 0 (CPOL 0 / CPHA 0), MSB first, 62.5 MHz
+          (pico SPI max = clk_sys/2; the MicroPython demo's 100 MHz
+          nominal is clamped the same way)
+Pins:     SCK=18  MOSI=19  CS=17  DC=16  RST=20  BL=21 (BL active high)
+Orientation: landscape 320 × 172, MadCTL 0x36 = 0x70
+Window:   CASET 0x2A = X 0..319 (no offset)
+          RASET 0x2B = Y 34..205  (offset +0x22 = 34; the 172-pixel
+          panel is centered in the controller's 240-row GRAM)
+Flush:    set window -> RAMWR (0x2C) -> DC high, CS low -> 110,080
+          bytes (320×172×2) -> CS high
+```
+
+Notes and gotchas:
+
+- **The C demo's window offsets are buggy** (they push windows past GRAM
+  limits: `X+0x22` on a 320-wide window, and `Y+0x22` beyond 205). The
+  MicroPython demo (`RP2350-LCD-1.47.py`) is the tested reference and the
+  numbers above follow it exactly.
+- **BGR565 byte order**: with MadCTL RGB=0 the panel reads pixels as BGR.
+  The demo's color constants are swapped accordingly (RED=0x07E0,
+  GREEN=0x001F, BLUE=0xF800); `drivers/lcd/st7789v3.sage` uses the same
+  convention.
+- Init register sequence (0x36=0x70, 0x3A=0x05, B2/B7/BB/C0/C2/C3/C4/C6,
+  D0/D6, gamma E0/E1, INVON 0x21, SLPOUT 0x11 + 120 ms, DISPON 0x29) is
+  taken verbatim from the official demos; the two demos differ only in the
+  last E1 gamma byte (0x23 vs 0x32) - the MicroPython value is used.
+- The 110,080-byte framebuffer is C-backed (`hw.lcd_fb_*` natives); Sage
+  drawing primitives write pixels into it and `lcd_show()` blasts it out.
 
 ### 3.2 Storage
 

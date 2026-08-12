@@ -1,6 +1,6 @@
 # SagePocket Developer Guide
 
-> **Version:** 0.1.0 · **Status:** Phase 0 complete; Phase 1 (hardware bring-up) in progress
+> **Version:** 0.2.0 · **Status:** Phase 0 complete; Phase 1 complete; Phase 2 (LCD boot screen) in progress
 
 This document describes how SagePocket is built, tested, and developed: the
 repository reference, development phases, build system plan, testing

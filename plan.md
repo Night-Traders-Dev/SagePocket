@@ -3457,3 +3457,26 @@ New compiler features added alongside the prelude guards (all verified):
   `adc_init/read`, `temp_c`, `rgb_set` (WS2812B via PIO). Host stubs are
   inert; embedded implementations use the pico SDK
   (`hardware_adc/pio/clocks` linked by the generated CMakeLists).
+- `hw` Phase 2 additions: `spi_init(bus, baud)`, `spi_write(bus, n|array)`,
+  `spi_read(bus, n)`, and the C-backed framebuffer natives
+  `lcd_fb_init(w, h)`, `lcd_fb_pixel(x, y, rgb565)`, `lcd_fb_fill(c)`,
+  `lcd_fb_flush_bytes(n)` (SPI0, mode 0, MSB first; 62.5 MHz nominal).
+  Generated CMakeLists now also links `hardware_spi`.
+
+## Phase 2 verified (2026-08-12)
+
+- `drivers/lcd/st7789v3.sage`: full ST7789V3 driver - init sequence (from the
+  MicroPython demo, E1 gamma tail 0x23), landscape 320×172, MadCTL 0x70,
+  RASET Y offset +34, BGR565 colors, 5×7 column-major font (ASCII 32..126),
+  primitives (`lcd_fill/fill_rect/rect/line/text`), `lcd_set_window`,
+  `lcd_show` (full-fb RAMWR flush via `hw.lcd_fb_flush_bytes`).
+- `boot/sageboot.sage` v0.2.0: self-contained LCD driver (per boot.md §4),
+  boot screen with header bar, live diagnostics, color swatch row, yellow
+  border, and a ~2 s uptime refresh on the LED phase loop.
+- SageBoot reports "LCD: ST7789V3 init PASS/FAIL" over stdio; SD remains
+  "NOT AVAILABLE IN PHASE 2".
+- `make arm`/`make rv` produce `sageboot` UF2s (175,616 bytes) and `hal`
+  UF2s; test suite: 21 checks pass (host smoke now asserts the LCD lines;
+  compile checks cover `drivers/lcd/st7789v3.sage`).
+- Verified window math: C demo's CASET/RASET offsets are wrong (exceed GRAM
+  limits); the MicroPython demo (X 0..319, Y+34) is the correct reference.
