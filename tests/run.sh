@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SagePocket Phase 0 test runner.
+# SagePocket test runner.
 #
 #   tests/run.sh          full suite (unit + host smoke + compile checks)
 #   tests/run.sh host     host smoke test only
@@ -99,7 +99,7 @@ typedef struct { int dummy; } uart_inst_t;
 static uart_inst_t uart0;
 static void uart_init(uart_inst_t* u, unsigned int b) { (void)u; (void)b; }
 static void uart_putc_raw(uart_inst_t* u, char c) { (void)u; (void)c; }
-static int uart_is_readable(uart_inst_t* u) { (void)u; return 0; }
+static int uart_is_readable(uart_inst_t* u) { (void)u; return -1; }
 static int uart_getc(uart_inst_t* u) { (void)u; return -1; }
 static void gpio_set_function(unsigned int p, int f) { (void)p; (void)f; }
 #define GPIO_FUNC_UART 2
@@ -121,7 +121,6 @@ static void sm_config_set_sideset(pio_sm_config* c, int bits, int opt, int pindi
 static void sm_config_set_wrap(pio_sm_config* c, int t, int w) { (void)c;(void)t;(void)w; }
 static void sm_config_set_out_shift(pio_sm_config* c, int right, int autopull, int thresh) { (void)c;(void)right;(void)autopull;(void)thresh; }
 static void sm_config_set_fifo_join(pio_sm_config* c, int j) { (void)c;(void)j; }
-static void sm_config_set_clkdiv_int_frac(pio_sm_config* c, unsigned int i, unsigned int f) { (void)c;(void)i;(void)f; }
 static void pio_sm_init(pio_hw_t* p, unsigned int sm, unsigned int off, const pio_sm_config* c) { (void)p;(void)sm;(void)off;(void)c; }
 static void pio_sm_set_enabled(pio_hw_t* p, unsigned int sm, int e) { (void)p;(void)sm;(void)e; }
 static void pio_sm_put_blocking(pio_hw_t* p, unsigned int sm, unsigned int v) { (void)p;(void)sm;(void)v; }
@@ -180,7 +179,7 @@ unit_tests() {
 compile_checks() {
     echo "== pico compile checks (ARM) =="
     local f dir name
-    for f in boot/sageboot.sage kernel/hal.sage drivers/lcd/st7789v3.sage; do
+    for f in boot/sageboot.sage kernel/hal.sage drivers/lcd/st7789v3.sage drivers/sd/sd_spi.sage drivers/fs/fat32.sage; do
         name="$(basename "$f" .sage)"
         if "$SAGE" --compile-pico "$f" -o "$SCRATCH/$name" \
                 --name "$name" --board "$BOARD" --chip rp2350-arm \

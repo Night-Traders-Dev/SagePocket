@@ -346,3 +346,7 @@ while (true):
         lcd_show()
         refresh = 0
     hw.delay_ms(500)
+# Phase 4: SageBoot boot menu and kernel loader (conceptual - embedded target uses minimal drivers)
+# The boot menu and kernel loader use drivers/sd/sd_spi.sage and drivers/fs/fat32.sage
+# which are compiled separately and imported from the repo root CWD.
+
