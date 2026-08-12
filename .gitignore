@@ -1,0 +1,8 @@
+.deps/
+obj/
+build/
+*.o
+*.uf2
+*.elf
+*.img
+__pycache__/
