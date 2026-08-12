@@ -65,6 +65,23 @@ GPIO, SPI, I²C, UART, PWM, ADC, PIO
 | Temperature sensor | Board temperature sensing |
 | Debug | UART exposed for serial console |
 
+### 3.0 Pin Map (verified 2026-08-11)
+
+Source: official Waveshare `RP2350-LCD-1.47.zip` demo package (2025-03-04),
+cross-checked with the board schematic. The same map is in
+`boards/waveshare_rp2350_lcd_1_47.h` (C/SDK) and `boards/board.sage` (Sage).
+
+```text
+LCD ST7789V3 (SPI0)     SCK=18  MOSI=19  CS=17  DC=16  RST=20  BL=21
+microSD (SPI1)          SCK=10  MOSI=11  MISO=12        CS=15
+RGB LED (WS2812B)       GPIO22  (PIO, GRB, one LED)
+I2C (module header)     i2c1: SDA=6  SCL=7
+UART0 console           TX=0  RX=1
+Flash                   W25Q128 (16 MB QSPI, not on GPIO)
+Temp sensor             RP2350 internal ADC4
+Buttons                 none (BOOT/RESET only)
+```
+
 ### 3.1 Display (ST7789V3)
 
 ```text
