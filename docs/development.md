@@ -1,6 +1,6 @@
 # SagePocket Developer Guide
 
-> **Version:** 0.1.0 · **Status:** Phase 0 (repository + build system + documentation)
+> **Version:** 0.1.0 · **Status:** Phase 0 complete; Phase 1 (hardware bring-up) in progress
 
 This document describes how SagePocket is built, tested, and developed: the
 repository reference, development phases, build system plan, testing
@@ -34,6 +34,10 @@ SagePocket/
 │
 ├── docs/               Specifications (this document set)
 │
+├── boards/             Board definitions
+│   ├── waveshare_rp2350_lcd_1_47.h   pico-sdk board header
+│   └── board.sage                    pin constants for Sage code
+│
 ├── boot/               SageBoot
 │   ├── sageboot.sage
 │   ├── startup/
@@ -42,6 +46,7 @@ SagePocket/
 │
 ├── kernel/             SageOS kernel
 │   ├── kernel.sage
+│   ├── hal.sage        SageHAL (hardware abstraction layer)
 │   ├── scheduler.sage
 │   ├── memory.sage
 │   ├── process.sage
@@ -99,10 +104,58 @@ SagePocket/
     ├── fonts/  icons/  themes/  boot/
 ```
 
-## 3. Build System (planned)
+## 3. Build System
 
-A `sagemake` orchestrator (mirroring the SageVM project's tooling) will
-provide:
+### 3.1 Prerequisites (verified 2026-08-11)
+
+```text
+sage compiler         >= 4.1.7 with the hw.* and --board-dir features
+                      (SageLang build; see plan.md Appendix)
+pico-sdk 2.1.0        at .deps/pico-sdk (fetched by pico_sdk_import.cmake)
+ARM:  arm-none-eabi-gcc       (multilib armv6-m/thumb)      -- chip rp2350-arm
+RISC-V: riscv32-unknown-elf-gcc 14.x
+       (multilib rv32imac_zicsr_zifencei_zba_zbb_zbkb_zbs/ilp32)
+       (official pico-sdk-tools release, installed at /opt/riscv)
+picotool 2.0.0       at /usr/local/bin
+```
+
+### 3.2 Makefile
+
+```text
+make all         build everything for both architectures
+make arm         build ARM (Cortex-M33) UF2s
+make rv          build RISC-V (Hazard3) UF2s
+make sageboot    boot/sageboot.sage
+make hal         kernel/hal.sage
+make host-test   host smoke test of SageBoot logic
+make test        full Phase 0 test suite
+make clean       remove build output
+```
+
+Artifacts land in `build/<arch>/<name>/` as
+`waveshare_rp2350_lcd_1_47-<name>-<arch>.uf2`.
+
+### 3.3 Direct compile
+
+```text
+sage --compile-pico boot/sageboot.sage -o build/sageboot \
+     --board waveshare_rp2350_lcd_1_47 --board-dir boards \
+     --chip rp2350-arm --sdk .deps/pico-sdk
+```
+
+Run from the repository root: the compiler locates
+`pico_sdk_import.cmake` by walking up from the current directory, and the
+`boards/` directory is the default `PICO_BOARD_HEADER_DIRS`.
+
+### 3.4 Board header
+
+`boards/waveshare_rp2350_lcd_1_47.h` is the pico-sdk board definition
+(discovered via `PICO_BOARD_HEADER_DIRS`); `boards/board.sage` mirrors the
+pin constants for Sage code. Both are verified against the official
+Waveshare RP2350-LCD-1.47 demo package (2025-03-04).
+
+A `sagemake` orchestrator may later wrap these targets (see the original
+plan below).
 
 ```text
 sagemake build              build all
@@ -191,6 +244,16 @@ Do **not** implement everything simultaneously. Follow `plan.md` §73:
 ```
 
 ## 6. Testing Strategy
+
+Run the Phase 0 suite with `make test` (or `tests/run.sh`). The runner:
+
+1. **Host smoke test** — compiles `boot/sageboot.sage` for the pico target,
+   swaps the pico headers for host stubs (`tests/run.sh` embeds the stub
+   harness), and checks the expected diagnostic output markers over stdout.
+2. **Unit tests** (`tests/unit/`) — pure-Sage files run in the interpreter;
+   each file may declare `# expect: <substring>` lines.
+3. **Compile checks** — every core `.sage` file must produce a UF2 for the
+   Waveshare board (ARM).
 
 ### Unit Tests (`tests/unit/`)
 

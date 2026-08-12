@@ -3418,3 +3418,42 @@ up from the CWD, so run it from the SagePocket repo root.
 - `sage_ffi_sym`/`sage_ffi_sym_addr` → false/nil on embedded.
 - Host-only io (`fopen`-based) still compiles under newlib (returns NULL at
   runtime on Pico; fine until SageFS provides a filesystem).
+
+## Verified board pinout (Waveshare RP2350-LCD-1.47-A)
+
+Source: official Waveshare `RP2350-LCD-1.47.zip` demo package (2025-03-04),
+files.waveshare.com, cross-checked with pico2hsm board reference:
+
+| Peripheral | Bus/pins | Notes |
+|------------|----------|-------|
+| LCD ST7789V3 172×320 | SPI0: SCK=18, MOSI=19, CS=17, DC=16, RST=20, BL=21 | mode 0, 100 MHz; BL active high |
+| microSD | SPI1: SCK=10, MOSI=11, MISO=12, CS=15 | mode 0; 400 kHz init → 5-20 MHz |
+| RGB LED | WS2812B on GPIO22 | PIO SM, 8 MHz, GRB, 1 LED |
+| I2C (module header) | i2c1: SDA=6, SCL=7 | — |
+| UART0 | TX=0, RX=1 | stdio uses USB CDC by default |
+| Flash | W25Q128 16 MB QSPI | `PICO_FLASH_SIZE_BYTES=16M` |
+| Temp | RP2350 internal ADC4 | 0.616 V @ 27 °C, −1.721 mV/°C |
+| Buttons | none (BOOT/RESET only) | — |
+
+`boards/waveshare_rp2350_lcd_1_47.h` is the pico-sdk board header (found via
+`PICO_BOARD_HEADER_DIRS`, set by `--board-dir` or defaulted to `<repo>/boards`);
+`boards/board.sage` mirrors the constants for Sage code.
+
+## Verified build + test workflow
+
+```
+make arm / make rv            # UF2s for boot/sageboot.sage + kernel/hal.sage
+make test                     # host smoke test + unit + compile checks (18 checks)
+sage --compile-pico boot/sageboot.sage -o build/x --board waveshare_rp2350_lcd_1_47 \
+     --board-dir boards --chip rp2350-arm --sdk .deps/pico-sdk
+```
+
+New compiler features added alongside the prelude guards (all verified):
+
+- `--board-dir <dir>`: sets `PICO_BOARD_HEADER_DIRS` for the cmake step
+  (relative paths are resolved against the CWD); defaults to `<repo>/boards`.
+- `hw`/`_hw` native module: `gpio_init/set_dir/put/get/set_pull`,
+  `clock_hz`, `uptime_ms`, `delay_ms/us`, `uart_init/putc/puts/getc`,
+  `adc_init/read`, `temp_c`, `rgb_set` (WS2812B via PIO). Host stubs are
+  inert; embedded implementations use the pico SDK
+  (`hardware_adc/pio/clocks` linked by the generated CMakeLists).
