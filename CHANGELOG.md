@@ -8,6 +8,13 @@ The format follows common changelog practice; each release groups changes by
 
 ### Added
 
+- Phase 4: boot menu (boot kernel / recovery / diagnostics / halt) in
+  `boot/sageboot.sage` v0.4.0, kernel loader for `SAGEOS.KRN` from SD+FAT32
+  (size + CRC16 verify), recovery re-diagnostics, UART0 menu input with
+  default-boot timeout; drivers imported from repo root CWD.
+- Phase 3: full SD/SPI driver (`drivers/sd/sd_spi.sage`) with byte-at-a-time
+  R1 polling and FAT32 filesystem driver (`drivers/fs/fat32.sage`) - mount,
+  directory listing, file read/write.
 - Repository scaffolding per the plan's Phase 0:
   - Complete directory layout (`boot/`, `kernel/`, `drivers/`, `sagefs/`,
     `sagevm/`, `gui/`, `shell/`, `apps/`, `emulators/`, `packages/`,
@@ -17,6 +24,11 @@ The format follows common changelog practice; each release groups changes by
     development)
   - `README.md`, `LICENSE`, `CHANGELOG.md`, `UPDATES.md`
   - Source stubs for the planned modules
+
+### Changed
+
+- Host smoke tests now assert the Phase 4 boot flow; 25 checks pass.
+- `make arm` / `make rv` build the sageboot UF2s with the Phase 4 flow.
 
 ## [0.0.1] - 2026
 

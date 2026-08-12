@@ -142,7 +142,7 @@ STUBHW
         check "sageboot host run stays in main loop" 0
     fi
 
-    for expect in "SageBoot" "Arch:" "Clock:" "UART0: PASS" "RGB LED: PASS" "LCD: ST7789V3 init FAIL" "SD: NOT AVAILABLE IN PHASE 2" "Phase 2 bring-up complete"; do
+    for expect in "SageBoot" "Arch:" "Clock:" "UART0: PASS" "RGB LED: PASS" "LCD: ST7789V3 init FAIL" "SD: NOT AVAILABLE" "SageBoot Phase 4 bring-up complete" "Boot menu:" "Boot: no SAGEOS.KRN on storage, staying in boot console"; do
         if echo "$out" | grep -qF "$expect"; then
             check "sageboot output contains '$expect'" 0
         else

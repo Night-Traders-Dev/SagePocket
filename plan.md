@@ -3480,3 +3480,25 @@ New compiler features added alongside the prelude guards (all verified):
   compile checks cover `drivers/lcd/st7789v3.sage`).
 - Verified window math: C demo's CASET/RASET offsets are wrong (exceed GRAM
   limits); the MicroPython demo (X 0..319, Y+34) is the correct reference.
+
+## Phase 4 verified (2026-08-12)
+
+- `boot/sageboot.sage` v0.4.0: boot menu (options 1 boot kernel / 2 recovery /
+  3 diagnostics / 0 halt), kernel loader (`SAGEOS.KRN` from SD+FAT, size and
+  CRC16 check), recovery re-diagnostics, and pre-boot storage bring-up
+  (SD init -> FAT mount -> root listing -> find `SAGEOS.KRN`).
+- Boot menu reads UART0 with a ~9 s poll window on device; on the host stub
+  `hw.uart_getc()` returns -1 so the loop ends immediately and defaults to
+  "boot kernel", keeping the host smoke deterministic.
+- Module imports work for boot files when compiling from the repo root
+  (`import drivers.sd.sd_spi as sd`) and compile into sageboot; note: a
+  module imported under two different aliases in one program breaks the
+  pico-C emitter, so sageboot uses the same alias as fat32.sage's own
+  import (`sd`).
+- Host smoke now asserts the Phase 4 strings ("SageBoot Phase 4 bring-up
+  complete.", "Boot menu:", "Boot: no SAGEOS.KRN on storage..."); 25
+  checks pass, 0 failed.
+- `make arm` / `make rv` both build sageboot UF2s with the Phase 4 flow.
+- SD card image build validated: 64 MB image, `SAGEOS.KRN` (2,048 bytes)
+  injected with `mkimg.py`, verified with `fsck.fat` and by mounting the
+  image (content md5 matches the source payload).

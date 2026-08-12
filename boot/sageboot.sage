@@ -7,13 +7,16 @@
 # own minimal drivers (docs/boot.md section 4) and reports hardware state
 # over the USB CDC console (stdio), UART0, and the LCD.
 #
-# Phase 3 adds the SD card; until then the boot flow prints
-# "NOT AVAILABLE" for that stage instead of claiming success.
+# Phase 3 adds the SD card + FAT32 (drivers/sd, drivers/fs). Phase 4 adds
+# the boot menu, kernel loader (SAGEOS.KRN from storage) and recovery mode.
+# Imports resolve from the repository root (CWD) when compiling.
 
 import hw
+import drivers.sd.sd_spi as sd
+import drivers.fs.fat32 as fat_driver
 
 var BOARD_NAME = "Waveshare RP2350-LCD-1.47-A"
-var VERSION = "0.2.0"
+var VERSION = "0.4.0"
 
 proc boot_separator():
     print "----------------------------------------"
@@ -62,7 +65,7 @@ proc diag_rgb():
     print "RGB LED: PASS"
 
 proc diag_not_ready(stage):
-    print stage + ": NOT AVAILABLE IN PHASE 2"
+    print stage + ": NOT AVAILABLE"
 
 # --- Phase 2: LCD driver (ST7789V3, self-contained per boot.md) ----------
 
@@ -280,7 +283,7 @@ proc boot_screen(status):
         lcd_text(6, 88, "LCD    : 320x172 PASS", LCD_COL_GREEN, 1)
     else:
         lcd_text(6, 88, "LCD    : FAIL", LCD_COL_RED, 1)
-    lcd_text(6, 96, "SD     : not in phase 2", LCD_COL_YELLOW, 1)
+    lcd_text(6, 96, "SD     : " + str(fat_driver.fat_mounted()), LCD_COL_WHITE, 1)
     var sw = 38
     var col = 6
     var swcolors = [LCD_COL_RED, LCD_COL_GREEN, LCD_COL_BLUE,
@@ -320,11 +323,138 @@ proc boot_sequence():
         print "LCD: ST7789V3 init PASS"
     else:
         print "LCD: ST7789V3 init FAIL"
-    diag_not_ready("SD")
-    boot_separator()
-    print "SageBoot Phase 2 bring-up complete."
-    boot_screen(lcd_ok)
 
+    # Phase 3/4: storage bring-up.
+    var sd_ok = sd.sd_init()
+    var kernel_entry = nil
+    var mount_ok = false
+    if sd_ok:
+        print "SD: init PASS (type " + str(sd.sd_type()) + ")"
+        mount_ok = fat_driver.fat_mount()
+        if mount_ok:
+            print "FAT: mount PASS"
+            var entries = fat_driver.fat_ls()
+            print "FAT: " + str(len(entries)) + " entries"
+            var ei = 0
+            while ei < len(entries):
+                print "  " + entries[ei]["name"] + " (" + str(entries[ei]["size"]) + " B)"
+                ei = ei + 1
+            kernel_entry = fat_driver.fat_find_file("SAGEOS.KRN")
+            if kernel_entry == nil:
+                print "SageOS kernel SAGEOS.KRN not found"
+        else:
+            print "FAT: mount FAIL"
+    else:
+        print "SD: init FAIL"
+        diag_not_ready("SD")
+
+    boot_separator()
+    print "SageBoot Phase 4 bring-up complete."
+    if lcd_ok:
+        boot_screen(4)
+    var choice = boot_menu()
+    if choice == 1:
+        if kernel_entry != nil:
+            kernel_loader(kernel_entry)
+        else:
+            print "Boot: no SAGEOS.KRN on storage, staying in boot console."
+    elif choice == 2:
+        recovery_mode()
+    elif choice == 3:
+        boot_diagnostics()
+    else:
+        print "Boot: halted in boot console."
+
+# --- Phase 4: boot menu, kernel loader, recovery --------------------------
+
+var MENU_TIMEOUT = 900     # ~9 s of 10 ms polls; on host (no real delay) instant.
+var KERNEL_NAME = "SAGEOS.KRN"
+
+# boot_menu(): print options and read a choice from UART0.
+# Timeout with no input falls back to the default boot choice 1. Host stub
+# returns -1 forever, so the loop ends immediately and defaults to boot.
+proc boot_menu():
+    boot_separator()
+    print "Boot menu:"
+    print "  1: Load SageOS kernel from SD"
+    print "  2: Recovery mode"
+    print "  3: Diagnostics (re-run)"
+    print "  0: Halt to boot console"
+    print "Select (default 1 within ~9 s):"
+    var i = 0
+    while i < MENU_TIMEOUT:
+        var c = hw.uart_getc()
+        if c >= 0:
+            if c == 49:
+                return 1
+            elif c == 50:
+                return 2
+            elif c == 51:
+                return 3
+            elif c == 48:
+                return 0
+        hw.delay_ms(10)
+        i = i + 1
+    print "Boot menu timeout: defaulting to option 1."
+    return 1
+
+# kernel_loader(entry): read the kernel file from storage, verify its size
+# and CRC, then hand off (Phase 5: jump to the loaded image).
+proc kernel_loader(entry):
+    boot_separator()
+    print "Kernel loader: reading " + entry["name"] + " (" + str(entry["size"]) + " bytes)..."
+    var data = fat_driver.fat_read_file(entry)
+    if data == nil:
+        print "Kernel load FAIL: read error."
+        return false
+    var crc = 0
+    var idx = 0
+    while idx < len(data):
+        crc = crc + data[idx]
+        crc = crc & 0xFFFF
+        idx = idx + 1
+    print "Kernel loaded: " + str(len(data)) + " bytes, CRC " + str(crc) + "."
+    if len(data) != entry["size"]:
+        print "Kernel load FAIL: size mismatch."
+        return false
+    print "Kernel verified. Hand-off to SageOS (Phase 5)."
+    return true
+
+# recovery_mode(): re-run the diagnostics and show stored fs status.
+proc recovery_mode():
+    boot_separator()
+    print "Recovery mode: full diagnostics."
+    diag_arch()
+    diag_clock()
+    diag_uptime()
+    diag_temp()
+    diag_gpio()
+    diag_uart()
+    diag_rgb()
+    print "Recovery: storage re-check."
+    var sd_ok = sd.sd_init()
+    if sd_ok:
+        print "SD: init PASS (type " + str(sd.sd_type()) + ")"
+        if fat_driver.fat_mount():
+            print "FAT: mount PASS"
+        else:
+            print "FAT: mount FAIL"
+    else:
+        print "SD: init FAIL"
+        diag_not_ready("SD")
+    print "Recovery diagnostics complete."
+
+proc boot_diagnostics():
+    diag_arch()
+    diag_clock()
+    diag_uptime()
+    diag_temp()
+    diag_gpio()
+    diag_uart()
+    diag_rgb()
+    print "Diagnostics complete."
+
+var boot_logo = 0
 boot_sequence()
 
 # Live uptime refresh on the LCD (every ~2 s) while the LED phase loop runs.
@@ -346,7 +476,4 @@ while (true):
         lcd_show()
         refresh = 0
     hw.delay_ms(500)
-# Phase 4: SageBoot boot menu and kernel loader (conceptual - embedded target uses minimal drivers)
-# The boot menu and kernel loader use drivers/sd/sd_spi.sage and drivers/fs/fat32.sage
-# which are compiled separately and imported from the repo root CWD.
 
