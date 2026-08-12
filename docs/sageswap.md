@@ -1,0 +1,2194 @@
+Yes, with one important architectural correction: **the 4 MB of flash cannot behave like conventional RAM**. The RP2350 has no MMU, and NOR flash has erase/write constraints and finite write endurance. We can, however, deliberately reserve 4 MB as a **flash-backed virtual-memory tier** and make SageOS/SageVM explicitly use it for cold, immutable, cacheable, or spillable data.
+
+That gives SagePocket a three-tier memory architecture:
+
+```text
+FASTEST
+   │
+   ▼
+520 KB SRAM
+   │
+   ▼
+4 MB FlashSwap
+   │
+   ▼
+128 GB SD / SageFS Swap
+   │
+   ▼
+SLOWEST
+```
+
+I would call the subsystem **SageSwap**, with `FlashSwap` as its first tier.
+
+# SageSwap
+
+## Flash-Backed Virtual Memory and Storage Tiers for SagePocket
+
+**Project:** SagePocket
+**Subsystem:** SageSwap
+**Target:** RP2350-LCD-1.47-A
+**Primary RAM:** 520 KB SRAM
+**FlashSwap:** 4 MB of onboard NOR flash
+**Persistent Storage:** 128 GB microSD / SageFS
+**Status:** Architecture / Implementation Plan
+**Version:** 0.1.0
+
+---
+
+# 1. Purpose
+
+SageSwap provides SagePocket with a deliberately tiered memory architecture using the limited resources available on the RP2350.
+
+The system will reserve:
+
+```text
+4 MB
+```
+
+of the board's:
+
+```text
+16 MB onboard QSPI NOR flash
+```
+
+for a dedicated **FlashSwap** region.
+
+The remaining flash is reserved for:
+
+```text
+SageBoot
+SageOS
+recovery
+configuration
+firmware
+system assets
+```
+
+The 128 GB microSD card provides the large persistent storage layer and, eventually, an optional lower-speed swap/page-storage tier.
+
+The architecture is:
+
+```text
+                 Sage Application
+                        │
+                        ▼
+                    SageVM
+                        │
+                        ▼
+                  Sage Memory API
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+          SRAM Manager        SageSwap
+              │                   │
+              │          ┌────────┴────────┐
+              │          │                 │
+              │      FlashSwap        SDSwap
+              │          │                 │
+              ▼          ▼                 ▼
+          520 KB RAM   4 MB Flash       128 GB SD
+              │          │                 │
+              └──────────┴─────────────────┘
+```
+
+---
+
+# 2. Important Hardware Constraint
+
+FlashSwap is **not conventional RAM**.
+
+The RP2350's onboard NOR flash has fundamentally different characteristics from SRAM:
+
+```text
+SRAM
+ ├── byte-addressable
+ ├── fast read/write
+ ├── effectively random access
+ └── volatile
+
+NOR Flash
+ ├── persistent
+ ├── excellent for reads
+ ├── limited program/erase cycles
+ ├── writes require programming operations
+ ├── erases occur in sectors
+ └── unsuitable for arbitrary high-frequency writes
+```
+
+Therefore SageSwap must never pretend that FlashSwap is ordinary writable RAM.
+
+Instead, SageOS will use it for:
+
+* cold VM pages
+* immutable bytecode
+* executable code
+* read-only application assets
+* compressed memory objects
+* serialized VM state
+* filesystem cache
+* infrequently modified objects
+* memory pressure spill
+* recovery state
+* crash snapshots
+* application packages
+* preloaded libraries
+
+The design goal is:
+
+> **Keep frequently modified working data in SRAM and explicitly move cold or suitable data into FlashSwap.**
+
+---
+
+# 3. Memory Hierarchy
+
+SagePocket will use four conceptual storage/memory tiers.
+
+```text
+                    ┌─────────────────┐
+                    │     CPU         │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │    SRAM         │
+                    │    520 KB       │
+                    │  volatile/RW    │
+                    └────────┬────────┘
+                             │
+                       SageSwap API
+                             │
+                    ┌────────▼────────┐
+                    │   FlashSwap     │
+                    │      4 MB       │
+                    │ persistent/slow │
+                    └────────┬────────┘
+                             │
+                       SageFS Cache
+                             │
+                    ┌────────▼────────┐
+                    │    SDSwap       │
+                    │     128 GB      │
+                    │ very large/slow │
+                    └─────────────────┘
+```
+
+Priority:
+
+```text
+SRAM       = active working memory
+FlashSwap  = fast-ish persistent cold storage
+SDSwap     = large persistent backing storage
+```
+
+---
+
+# 4. Flash Layout
+
+The 16 MB onboard flash will be divided conceptually as follows.
+
+Initial layout:
+
+```text
+16 MB FLASH
+│
+├── 0x000000 ────────────────
+│
+│   SageBoot
+│
+├── SageBoot configuration
+│
+├── Recovery image
+│
+├── SageOS kernel
+│
+├── System libraries
+│
+├── Hardware drivers
+│
+├── System assets
+│
+├── Reserved
+│
+├── FlashSwap metadata
+│
+├── FlashSwap
+│   4 MB
+│
+└── Reserved / future
+```
+
+The exact offsets must be generated by the SagePocket linker rather than hard-coded in application source.
+
+---
+
+# 5. FlashSwap Region
+
+The FlashSwap region is exactly:
+
+```text
+4 MiB
+```
+
+or:
+
+```text
+4,194,304 bytes
+```
+
+It should be aligned to the flash erase geometry used by the selected flash device.
+
+The implementation must obtain the actual erase-sector size from the board/flash configuration rather than assuming one.
+
+Conceptually:
+
+```text
+FlashSwap
+│
+├── Superblock
+├── Allocation bitmap
+├── Page metadata
+├── Wear metadata
+├── Checksum metadata
+├── Page storage
+└── Recovery area
+```
+
+---
+
+# 6. FlashSwap Page Size
+
+Initial logical page size:
+
+```text
+4 KB
+```
+
+This gives:
+
+```text
+4 MB / 4 KB
+= 1024 logical pages
+```
+
+Therefore:
+
+```text
+FlashSwap pages: 1024
+```
+
+A future implementation may support:
+
+```text
+1 KB
+2 KB
+4 KB
+8 KB
+16 KB
+```
+
+but 4 KB should be the initial standard.
+
+---
+
+# 7. Page Descriptor
+
+Each FlashSwap page should have metadata similar to:
+
+```text
+PageDescriptor
+{
+    page_id
+    physical_offset
+    state
+    owner
+    generation
+    checksum
+    flags
+    compression
+    access_count
+    dirty
+}
+```
+
+Possible states:
+
+```text
+FREE
+ACTIVE
+COLD
+CLEAN
+DIRTY
+COMPRESSED
+INVALID
+RESERVED
+RECOVERY
+```
+
+---
+
+# 8. FlashSwap States
+
+## FREE
+
+Available for allocation.
+
+## CLEAN
+
+Contains valid data identical to the canonical source.
+
+## COLD
+
+Data has been intentionally removed from SRAM because it is not currently needed.
+
+## DIRTY
+
+Data has been modified and must eventually be synchronized.
+
+## COMPRESSED
+
+Data is stored in compressed form.
+
+## INVALID
+
+Data is no longer valid and may be reclaimed.
+
+## RECOVERY
+
+Reserved for crash/recovery operations.
+
+---
+
+# 9. Explicit Memory Placement
+
+SageLang/SageOS should expose explicit memory-placement semantics.
+
+Conceptually:
+
+```text
+memory.allocate(size)
+```
+
+allocates normal SRAM.
+
+Whereas:
+
+```text
+memory.allocate_flash(size)
+```
+
+requests FlashSwap-backed storage.
+
+Applications should be able to explicitly identify cold data:
+
+```text
+memory.cold(object)
+```
+
+or:
+
+```text
+memory.persist(object)
+```
+
+The exact SageLang syntax must follow the current SageLang language specification.
+
+---
+
+# 10. Memory Classes
+
+SageOS should define explicit memory classes.
+
+```text
+FAST
+NORMAL
+COLD
+PERSISTENT
+EXECUTABLE
+STREAM
+```
+
+Meaning:
+
+### FAST
+
+Must reside in SRAM.
+
+Use for:
+
+* stack
+* active variables
+* interrupt data
+* hot VM state
+* rendering state
+
+### NORMAL
+
+Normal SRAM allocation.
+
+### COLD
+
+Eligible for FlashSwap.
+
+### PERSISTENT
+
+Stored in SageFS/SD or FlashSwap.
+
+### EXECUTABLE
+
+Prefer XIP flash or SRAM depending on performance.
+
+### STREAM
+
+Large data that should not consume significant SRAM.
+
+---
+
+# 11. Explicit Coding Policy
+
+SagePocket code should be written with memory placement in mind.
+
+The preferred rule is:
+
+```text
+HOT DATA
+→ SRAM
+
+COLD DATA
+→ FlashSwap
+
+LARGE DATA
+→ SageFS / SD
+
+IMMUTABLE CODE
+→ Flash/XIP
+
+TEMPORARY DATA
+→ SRAM
+
+PERSISTENT DATA
+→ SageFS
+```
+
+Do not blindly allocate everything in SRAM.
+
+---
+
+# 12. VM Memory Policy
+
+SageVM should explicitly separate:
+
+```text
+VM registers
+VM stack
+VM heap
+bytecode
+constants
+cold objects
+persistent objects
+```
+
+Recommended:
+
+```text
+VM registers
+    → SRAM
+
+VM stack
+    → SRAM
+
+active heap
+    → SRAM
+
+bytecode
+    → Flash/XIP
+
+constant pool
+    → Flash/XIP or FlashSwap
+
+cold heap objects
+    → FlashSwap
+
+large assets
+    → SD
+```
+
+---
+
+# 13. SageVM Cold Object System
+
+SageVM should support objects that can be marked as cold.
+
+Conceptually:
+
+```text
+object.mark_cold()
+```
+
+When memory pressure increases:
+
+```text
+SageVM
+  │
+  ▼
+find cold objects
+  │
+  ▼
+serialize
+  │
+  ▼
+FlashSwap
+  │
+  ▼
+release SRAM
+```
+
+When accessed:
+
+```text
+application
+  │
+  ▼
+cold object reference
+  │
+  ▼
+SageSwap fault
+  │
+  ▼
+read FlashSwap
+  │
+  ▼
+restore SRAM object
+```
+
+---
+
+# 14. No Transparent MMU
+
+The RP2350 does not provide a conventional MMU suitable for transparent virtual memory paging.
+
+Therefore SageSwap must operate at the software/runtime level.
+
+Do not attempt:
+
+```text
+virtual address
+→ hardware page table
+→ automatic flash paging
+```
+
+Instead implement:
+
+```text
+Sage object reference
+→ SageVM memory manager
+→ SageSwap
+→ backing storage
+```
+
+This is a deliberate design decision.
+
+---
+
+# 15. SageSwap Handle System
+
+Flash-backed objects should use handles rather than raw pointers.
+
+Conceptually:
+
+```text
+SwapHandle
+{
+    id
+    generation
+    type
+    size
+    flags
+}
+```
+
+Application:
+
+```text
+handle = swap.allocate(4096)
+```
+
+Access:
+
+```text
+ptr = swap.lock(handle)
+```
+
+Release:
+
+```text
+swap.unlock(handle)
+```
+
+When no longer needed:
+
+```text
+swap.release(handle)
+```
+
+This prevents FlashSwap objects from being treated as normal RAM pointers.
+
+---
+
+# 16. Lock / Unlock Semantics
+
+A FlashSwap object must be locked before being modified.
+
+Conceptual flow:
+
+```text
+swap.lock(handle)
+        │
+        ▼
+copy FlashSwap → SRAM
+        │
+        ▼
+application modifies SRAM
+        │
+        ▼
+swap.unlock(handle)
+        │
+        ▼
+mark dirty
+```
+
+Later:
+
+```text
+swap.flush(handle)
+        │
+        ▼
+write SRAM copy → FlashSwap
+```
+
+This minimizes unnecessary flash writes.
+
+---
+
+# 17. Read-Only Flash Mapping
+
+The RP2350's flash is memory-mapped for execution/read access.
+
+SagePocket should exploit this wherever possible.
+
+Immutable objects should preferably remain directly in XIP flash instead of being copied into SRAM.
+
+Examples:
+
+```text
+font tables
+icons
+constant strings
+bytecode
+read-only lookup tables
+system metadata
+application resources
+```
+
+Policy:
+
+```text
+IF immutable
+    prefer XIP
+
+IF mutable and hot
+    SRAM
+
+IF mutable and cold
+    FlashSwap
+```
+
+---
+
+# 18. Application Code
+
+Applications should be compiled so that immutable code/data can remain in flash where practical.
+
+For native Sage applications:
+
+```text
+native code
+    → XIP flash
+
+constant data
+    → XIP flash
+
+mutable state
+    → SRAM
+
+cold state
+    → FlashSwap
+```
+
+This reduces SRAM pressure.
+
+---
+
+# 19. SageGUI Memory Policy
+
+GUI memory is one of the largest consumers of SRAM.
+
+Therefore SageGUI should aggressively separate:
+
+```text
+hot rendering data
+```
+
+from:
+
+```text
+cold assets
+```
+
+## SRAM
+
+Keep:
+
+```text
+current draw buffer
+dirty rectangles
+active widgets
+touch/input state
+rendering state
+```
+
+## Flash
+
+Keep:
+
+```text
+fonts
+icons
+static UI assets
+theme definitions
+immutable images
+```
+
+## SD
+
+Keep:
+
+```text
+large images
+animations
+application resources
+user-created artwork
+```
+
+---
+
+# 20. Framebuffer Policy
+
+A complete RGB565 framebuffer requires approximately:
+
+```text
+172 × 320 × 2
+= 110,080 bytes
+```
+
+Therefore SageGUI should not automatically reserve multiple full framebuffers.
+
+Preferred modes:
+
+```text
+MODE_TILED
+MODE_PARTIAL
+MODE_SINGLE_BUFFER
+MODE_FULL_FRAMEBUFFER
+```
+
+Default:
+
+```text
+MODE_PARTIAL
+```
+
+---
+
+# 21. Filesystem Cache
+
+FlashSwap can also act as an intermediate cache for SageFS.
+
+Architecture:
+
+```text
+SageFS
+  │
+  ▼
+Page Cache
+  │
+  ├── SRAM hot cache
+  │
+  └── FlashSwap cold cache
+             │
+             ▼
+           SD card
+```
+
+This can reduce repeated SD-card reads.
+
+However, FlashSwap must never be treated as a replacement for the SD card's persistent filesystem.
+
+The SD remains authoritative for user files.
+
+---
+
+# 22. SD Swap Tier
+
+A future SageSwap implementation may allow selected anonymous/cold data to spill to the SD card.
+
+```text
+SRAM
+ ↓
+FlashSwap
+ ↓
+SDSwap
+```
+
+SDSwap should be optional.
+
+Configuration:
+
+```text
+swap.flash = true
+swap.sd = false
+```
+
+or:
+
+```text
+swap.flash = true
+swap.sd = true
+```
+
+Default:
+
+```text
+swap.flash = true
+swap.sd = false
+```
+
+because excessive small writes to an SD card should be avoided.
+
+---
+
+# 23. SD Swap File
+
+If enabled:
+
+```text
+/system/swap/sage.swap
+```
+
+or:
+
+```text
+/swap/sage.swap
+```
+
+The swap file should be preallocated rather than dynamically fragmented.
+
+Example:
+
+```text
+/swap/sage.swap
+size = 256 MB
+```
+
+The size should be configurable.
+
+The 128 GB card provides ample capacity, but capacity alone should not justify unnecessary swapping.
+
+---
+
+# 24. Swap Priority
+
+Each backing tier receives a priority.
+
+```text
+SRAM
+priority = 0
+
+FlashSwap
+priority = 1
+
+SDSwap
+priority = 2
+```
+
+Lower number means faster.
+
+When allocating:
+
+```text
+request
+  ↓
+SRAM
+  ↓
+if pressure
+FlashSwap
+  ↓
+if pressure
+SDSwap
+```
+
+---
+
+# 25. Memory Pressure Manager
+
+SageOS should continuously track:
+
+```text
+free SRAM
+largest free block
+VM heap usage
+GUI usage
+filesystem cache
+FlashSwap utilization
+SD swap utilization
+```
+
+Define pressure levels:
+
+```text
+NORMAL
+LOW
+MEDIUM
+HIGH
+CRITICAL
+```
+
+Example:
+
+```text
+NORMAL
+> 30% SRAM free
+
+LOW
+20–30%
+
+MEDIUM
+10–20%
+
+HIGH
+5–10%
+
+CRITICAL
+< 5%
+```
+
+These thresholds should be tunable.
+
+---
+
+# 26. Pressure Response
+
+## LOW
+
+Do nothing aggressive.
+
+## MEDIUM
+
+Evict:
+
+```text
+filesystem cache
+unused GUI assets
+cold VM objects
+```
+
+## HIGH
+
+Evict:
+
+```text
+cold application objects
+unused buffers
+inactive tasks
+```
+
+to FlashSwap.
+
+## CRITICAL
+
+Attempt:
+
+```text
+FlashSwap
+→ SD swap
+```
+
+and terminate nonessential applications if necessary.
+
+---
+
+# 27. Application Memory Quotas
+
+Every SageVM application should have a memory budget.
+
+Example:
+
+```text
+Calculator
+32 KB
+
+Terminal
+48 KB
+
+File Manager
+64 KB
+
+Paint
+96 KB
+
+Game
+128 KB
+```
+
+If an application exceeds its SRAM quota:
+
+```text
+SageVM
+   ↓
+cold object eviction
+   ↓
+FlashSwap
+```
+
+This prevents one application from consuming the entire machine.
+
+---
+
+# 28. FlashSwap Compression
+
+Cold objects may optionally be compressed.
+
+Pipeline:
+
+```text
+SRAM object
+    ↓
+compress
+    ↓
+FlashSwap
+```
+
+When loaded:
+
+```text
+FlashSwap
+    ↓
+decompress
+    ↓
+SRAM
+```
+
+Possible algorithms:
+
+```text
+RLE
+LZ4
+heatshrink
+custom Sage compression
+```
+
+Initial implementation:
+
+```text
+no compression
+```
+
+Then benchmark.
+
+---
+
+# 29. Wear Management
+
+FlashSwap must track write/erase activity.
+
+Metadata:
+
+```text
+erase_count
+program_count
+generation
+last_used
+```
+
+The allocator should avoid repeatedly using the same physical sectors.
+
+Logical pages must therefore be separated from physical flash locations.
+
+```text
+Logical Page 42
+        │
+        ▼
+Physical Sector 17
+
+later
+
+Logical Page 42
+        │
+        ▼
+Physical Sector 23
+```
+
+This provides basic wear leveling.
+
+---
+
+# 30. Garbage Collection
+
+Because flash erase operates on larger regions than logical pages, SageSwap requires garbage collection.
+
+Conceptual:
+
+```text
+FlashSwap
+│
+├── live page
+├── invalid page
+├── live page
+├── invalid page
+├── free page
+└── live page
+```
+
+GC:
+
+```text
+select erase block
+        ↓
+copy live pages
+        ↓
+update metadata
+        ↓
+erase block
+        ↓
+return block to free pool
+```
+
+---
+
+# 31. Crash Consistency
+
+Every FlashSwap metadata update must be recoverable.
+
+Use:
+
+```text
+generation numbers
+checksums
+commit markers
+duplicate metadata
+```
+
+Write sequence:
+
+```text
+write new page
+     ↓
+verify
+     ↓
+write metadata
+     ↓
+commit
+```
+
+Never overwrite the only valid copy of critical metadata before a new valid copy exists.
+
+---
+
+# 32. Swap Superblock
+
+FlashSwap should contain a superblock.
+
+Conceptual:
+
+```text
+SAGESWAP
+
+magic
+version
+page_size
+total_pages
+free_pages
+generation
+metadata_offset
+data_offset
+checksum
+```
+
+At boot:
+
+```text
+SageBoot
+   ↓
+validate superblock
+   ↓
+SageSwap initialization
+```
+
+If invalid:
+
+```text
+rebuild metadata
+```
+
+---
+
+# 33. FlashSwap API
+
+Core API:
+
+```text
+swap.init()
+
+swap.allocate(size)
+
+swap.free(handle)
+
+swap.lock(handle)
+
+swap.unlock(handle)
+
+swap.flush(handle)
+
+swap.prefetch(handle)
+
+swap.evict(handle)
+
+swap.stats()
+
+swap.sync()
+
+swap.recover()
+```
+
+---
+
+# 34. Memory API
+
+SageOS memory manager should expose:
+
+```text
+memory.alloc()
+memory.free()
+
+memory.alloc_fast()
+memory.alloc_cold()
+memory.alloc_persistent()
+
+memory.mark_cold()
+memory.mark_hot()
+
+memory.prefetch()
+memory.evict()
+
+memory.stats()
+```
+
+The exact SageLang syntax will follow the project's current language specification.
+
+---
+
+# 35. Explicit Allocation Policy
+
+SagePocket source code should follow this rule:
+
+```text
+Use SRAM explicitly when:
+    data is frequently accessed
+    data is modified frequently
+    data is latency-sensitive
+
+Use FlashSwap explicitly when:
+    data is cold
+    data is large
+    data is rarely modified
+    data can tolerate access latency
+    data benefits from persistence
+
+Use SD explicitly when:
+    data is very large
+    data is user data
+    data is application data
+    data is ROM/media
+    data does not need RAM-like access
+```
+
+---
+
+# 36. Example Architecture
+
+A game could use:
+
+```text
+Game code
+    → XIP flash
+
+Game constants
+    → XIP flash
+
+Game state
+    → SRAM
+
+Unused level data
+    → FlashSwap
+
+Textures
+    → SD
+
+Save file
+    → SageFS / SD
+```
+
+This is the intended programming model.
+
+---
+
+# 37. Example SageVM Application
+
+Conceptually:
+
+```text
+Application
+│
+├── code
+│     └── XIP
+│
+├── constants
+│     └── XIP
+│
+├── active_state
+│     └── SRAM
+│
+├── inactive_levels
+│     └── FlashSwap
+│
+└── assets
+      └── SageFS / SD
+```
+
+The application should explicitly identify these categories during compilation.
+
+---
+
+# 38. Compiler Integration
+
+Eventually Sage Compiler should understand memory attributes.
+
+Conceptually:
+
+```text
+@memory("fast")
+var render_state
+
+@memory("cold")
+var level_cache
+
+@memory("persistent")
+var save_state
+
+@memory("flash")
+const font_data
+```
+
+The compiler should translate these into appropriate SageVM/native metadata.
+
+The exact syntax should not be finalized until it is reconciled with the existing SageLang type/attribute system.
+
+---
+
+# 39. SageVM Object Metadata
+
+Every managed object may contain:
+
+```text
+type
+size
+generation
+flags
+location
+reference_count
+```
+
+Location:
+
+```text
+SRAM
+FLASH
+SD
+```
+
+Flags:
+
+```text
+HOT
+COLD
+IMMUTABLE
+DIRTY
+PERSISTENT
+PINNED
+COMPRESSED
+```
+
+---
+
+# 40. Pinned Memory
+
+Some objects must never be evicted.
+
+Examples:
+
+```text
+interrupt buffers
+DMA buffers
+kernel stacks
+active framebuffer
+critical driver state
+```
+
+Use:
+
+```text
+PINNED
+```
+
+attribute.
+
+Pinned objects must remain in SRAM.
+
+---
+
+# 41. DMA Restrictions
+
+DMA buffers must normally reside in suitable SRAM.
+
+Therefore:
+
+```text
+FlashSwap → DMA
+```
+
+is not permitted directly.
+
+Instead:
+
+```text
+FlashSwap
+   ↓
+SRAM DMA buffer
+   ↓
+DMA
+   ↓
+peripheral
+```
+
+---
+
+# 42. Interrupt Restrictions
+
+Interrupt handlers must never directly access FlashSwap in a way that could require blocking flash operations.
+
+Bad:
+
+```text
+IRQ
+ ↓
+swap.lock()
+ ↓
+flash operation
+```
+
+Good:
+
+```text
+IRQ
+ ↓
+copy minimal data to SRAM
+ ↓
+signal task
+ ↓
+task accesses SageSwap
+```
+
+---
+
+# 43. Kernel Memory Policy
+
+Kernel code must be conservative.
+
+Kernel-critical data:
+
+```text
+SRAM
+```
+
+Kernel code:
+
+```text
+XIP flash
+```
+
+Kernel cold tables:
+
+```text
+Flash/XIP
+```
+
+Kernel persistent configuration:
+
+```text
+Flash configuration area or SageFS
+```
+
+Never page essential interrupt state.
+
+---
+
+# 44. SageBoot Policy
+
+SageBoot should not depend on FlashSwap.
+
+Boot dependencies must remain available independently:
+
+```text
+SageBoot
+Kernel
+Recovery
+```
+
+FlashSwap should be initialized only after basic hardware and memory initialization.
+
+---
+
+# 45. Recovery Behavior
+
+If FlashSwap metadata is corrupted:
+
+```text
+SageBoot
+   ↓
+SageOS recovery
+   ↓
+discard FlashSwap state
+   ↓
+reinitialize FlashSwap
+```
+
+User files on the SD card must remain untouched.
+
+---
+
+# 46. FlashSwap Statistics
+
+Provide:
+
+```text
+sage> swap
+```
+
+Example:
+
+```text
+SAGESWAP
+
+SRAM
+Used:       301 KB
+Free:       219 KB
+
+FlashSwap
+Total:        4 MB
+Used:       1.7 MB
+Free:       2.3 MB
+
+Pages
+Total:      1024
+Used:        436
+Free:        588
+
+Compressed:  102
+Dirty:        18
+
+Erase cycles
+Min:          12
+Max:          17
+Average:      14
+```
+
+---
+
+# 47. Memory Diagnostic
+
+Provide:
+
+```text
+sage> mem
+```
+
+Example:
+
+```text
+SAGE MEMORY
+
+SRAM
+────────────────────
+Kernel        68 KB
+VM            91 KB
+GUI           72 KB
+Drivers       31 KB
+Apps          48 KB
+Free         210 KB
+
+FLASH
+────────────────────
+System        7.1 MB
+FlashSwap     4.0 MB
+Free          4.9 MB
+
+SD
+────────────────────
+Capacity      128 GB
+Used          3.2 GB
+Free        124.8 GB
+```
+
+Actual flash allocation must be determined by the linker.
+
+---
+
+# 48. Swap Debugging
+
+Commands:
+
+```text
+swap
+swap stats
+swap list
+swap flush
+swap gc
+swap verify
+swap recover
+```
+
+Development-only:
+
+```text
+swap dump <handle>
+swap trace
+swap stress
+swap wear
+```
+
+---
+
+# 49. Swap Stress Testing
+
+Tests should include:
+
+```text
+allocate 4 MB
+fill all pages
+evict all pages
+reload all pages
+random page access
+repeated writes
+power-loss simulation
+metadata corruption
+GC stress
+wear-leveling test
+```
+
+---
+
+# 50. Performance Targets
+
+Initial targets are relative rather than absolute.
+
+FlashSwap should provide:
+
+```text
+faster access than SD
+lower capacity than SD
+lower latency than SD
+higher persistence than SRAM
+```
+
+The system should optimize for:
+
+```text
+few large transfers
+```
+
+rather than:
+
+```text
+many tiny flash writes
+```
+
+---
+
+# 51. Write Coalescing
+
+Multiple small modifications should be accumulated in SRAM.
+
+Example:
+
+```text
+Application modifies object
+       │
+       ├── modification 1
+       ├── modification 2
+       ├── modification 3
+       └── modification 4
+                 │
+                 ▼
+             one flush
+                 │
+                 ▼
+             FlashSwap
+```
+
+This significantly reduces flash programming activity.
+
+---
+
+# 52. Flush Policy
+
+Possible policies:
+
+```text
+MANUAL
+PERIODIC
+PRESSURE
+APPLICATION_EXIT
+SYSTEM_SHUTDOWN
+```
+
+Default:
+
+```text
+PRESSURE
+APPLICATION_EXIT
+SYSTEM_SHUTDOWN
+```
+
+Periodic flushing should be conservative.
+
+---
+
+# 53. Persistence Semantics
+
+FlashSwap should not automatically mean permanent user storage.
+
+There are three distinct concepts:
+
+```text
+SWAP
+CACHE
+PERSISTENT STORAGE
+```
+
+FlashSwap may support all three internally, but APIs must distinguish them.
+
+For example:
+
+```text
+swap object
+cache object
+persistent object
+```
+
+A user file belongs in:
+
+```text
+SageFS
+```
+
+not merely in FlashSwap.
+
+---
+
+# 54. SD Card as Persistent Authority
+
+The SD card remains the authoritative location for:
+
+```text
+user documents
+applications
+games
+ROMs
+media
+save files
+configuration backups
+large datasets
+```
+
+FlashSwap is an optimization layer.
+
+Never make user data depend exclusively on volatile RAM or transient swap state.
+
+---
+
+# 55. Recommended Final Memory Architecture
+
+```text
+┌──────────────────────────────────────────┐
+│                SagePocket                │
+├──────────────────────────────────────────┤
+│                                          │
+│  SRAM — 520 KB                           │
+│  ─────────────────────────────────────   │
+│  Hot code/data                           │
+│  stacks                                  │
+│  active VM heap                          │
+│  GUI buffers                             │
+│  DMA buffers                             │
+│                                          │
+├──────────────────────────────────────────┤
+│                                          │
+│  FlashSwap — 4 MB                        │
+│  ─────────────────────────────────────   │
+│  Cold VM objects                         │
+│  serialized state                        │
+│  cache                                   │
+│  immutable/cold assets                   │
+│  compressed objects                      │
+│                                          │
+├──────────────────────────────────────────┤
+│                                          │
+│  SageFS / SD — 128 GB                    │
+│  ─────────────────────────────────────   │
+│  Applications                            │
+│  ROMs                                    │
+│  user data                               │
+│  media                                   │
+│  large assets                            │
+│  optional SDSwap                         │
+│                                          │
+└──────────────────────────────────────────┘
+```
+
+---
+
+# 56. Implementation Phases
+
+## Phase 1 — Linker Reservation
+
+Reserve exactly 4 MB of flash for FlashSwap.
+
+Deliver:
+
+```text
+memory layout
+linker definitions
+flash symbols
+build verification
+```
+
+---
+
+## Phase 2 — Flash Driver
+
+Implement:
+
+```text
+flash.read()
+flash.program()
+flash.erase()
+flash.verify()
+```
+
+with appropriate alignment and locking.
+
+---
+
+## Phase 3 — FlashSwap Metadata
+
+Implement:
+
+```text
+superblock
+page table
+allocation bitmap
+checksums
+generation counters
+```
+
+---
+
+## Phase 4 — Page Allocation
+
+Implement:
+
+```text
+swap.allocate_page()
+swap.free_page()
+swap.read_page()
+swap.write_page()
+```
+
+---
+
+## Phase 5 — SageOS Integration
+
+Connect:
+
+```text
+SageOS Memory Manager
+        │
+        ▼
+SageSwap
+```
+
+Implement memory pressure detection.
+
+---
+
+## Phase 6 — SageVM Integration
+
+Allow:
+
+```text
+cold VM objects
+```
+
+to be serialized into FlashSwap.
+
+---
+
+## Phase 7 — SageGUI Integration
+
+Move:
+
+```text
+static assets
+fonts
+icons
+themes
+```
+
+out of SRAM wherever practical.
+
+---
+
+## Phase 8 — Filesystem Cache
+
+Use FlashSwap as a cold cache for SageFS.
+
+---
+
+## Phase 9 — Compression
+
+Benchmark:
+
+```text
+uncompressed
+RLE
+LZ4
+heatshrink
+```
+
+Choose based on RP2350 performance and RAM consumption.
+
+---
+
+## Phase 10 — Wear Leveling
+
+Implement:
+
+```text
+logical → physical mapping
+erase counters
+garbage collection
+```
+
+---
+
+## Phase 11 — Recovery
+
+Implement:
+
+```text
+crash-safe metadata
+recovery scanning
+corruption detection
+automatic reconstruction
+```
+
+---
+
+## Phase 12 — Optional SDSwap
+
+Only after FlashSwap is stable.
+
+Implement:
+
+```text
+/swap/sage.swap
+```
+
+on SageFS.
+
+---
+
+# 57. Development Rules
+
+All SagePocket developers should follow these rules.
+
+### Rule 1
+
+Do not allocate large permanent buffers in SRAM without justification.
+
+### Rule 2
+
+Do not copy immutable data from flash into SRAM unnecessarily.
+
+### Rule 3
+
+Use XIP for suitable immutable code/data.
+
+### Rule 4
+
+Use FlashSwap for cold data.
+
+### Rule 5
+
+Use SD for large persistent data.
+
+### Rule 6
+
+Never use FlashSwap directly as a DMA buffer.
+
+### Rule 7
+
+Never perform blocking FlashSwap operations inside interrupt handlers.
+
+### Rule 8
+
+Do not repeatedly rewrite the same flash region.
+
+### Rule 9
+
+Batch writes.
+
+### Rule 10
+
+Keep the SD card as the authoritative persistent filesystem.
+
+### Rule 11
+
+Applications must declare memory expectations where practical.
+
+### Rule 12
+
+The kernel must remain functional even if FlashSwap becomes unavailable.
+
+---
+
+# 58. Definition of Done
+
+SageSwap 1.0 is complete when:
+
+```text
+✓ 4 MB flash region is reserved
+✓ FlashSwap metadata is recoverable
+✓ 4 KB logical pages work
+✓ pages can be allocated
+✓ pages can be freed
+✓ pages can be read
+✓ pages can be written
+✓ checksums detect corruption
+✓ generation counters detect stale pages
+✓ memory manager can evict cold objects
+✓ SageVM can store cold objects
+✓ SageGUI can keep static assets out of SRAM
+✓ filesystem cache can use FlashSwap
+✓ wear leveling works
+✓ garbage collection works
+✓ crash recovery works
+✓ FlashSwap statistics work
+✓ memory-pressure eviction works
+✓ SD remains authoritative
+✓ system works without FlashSwap
+```
+
+---
+
+# 59. Final Design Philosophy
+
+SagePocket should not pretend that 4 MB of flash magically turns the RP2350's 520 KB of SRAM into 4.5 MB of normal RAM.
+
+Instead, SagePocket should exploit the hardware intelligently.
+
+The intended hierarchy is:
+
+```text
+                PERFORMANCE
+                    ▲
+                    │
+              ┌─────┴─────┐
+              │   SRAM    │
+              │   520 KB  │
+              └─────┬─────┘
+                    │
+              hot/cold boundary
+                    │
+              ┌─────▼─────┐
+              │ FlashSwap │
+              │    4 MB   │
+              └─────┬─────┘
+                    │
+              large-data boundary
+                    │
+              ┌─────▼─────┐
+              │  SageFS   │
+              │  128 GB   │
+              └───────────┘
+                    │
+                    ▼
+                 CAPACITY
+```
+
+The key programming principle is:
+
+```text
+                    Sage Application
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+           HOT           COLD          LARGE
+             │             │             │
+             ▼             ▼             ▼
+           SRAM        FlashSwap       SageFS
+          520 KB         4 MB          128 GB
+```
+
+This should become a fundamental part of SagePocket's architecture rather than an afterthought.
+
+**SagePocket is therefore explicitly a tiered-memory computer:**
+
+```text
+SageLang
+   ↓
+Sage Compiler
+   ↓
+SageVM
+   ↓
+SageOS Memory Manager
+   │
+   ├── SRAM
+   │
+   ├── FlashSwap
+   │
+   └── SageFS / SD
+```
+
+The compiler, VM, GUI, filesystem, and applications should all be designed to understand these tiers from the beginning.
+
+**One change I would make to the original SagePocket plan:** treat `SageSwap` as a first-class subsystem alongside SageFS, rather than trying to bolt it on later. The compiler/VM should know about **hot vs. cold vs. persistent data** from the beginning.
