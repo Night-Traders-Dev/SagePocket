@@ -18,14 +18,23 @@ it ports carries a sync recipe.
 
 ## Known upstream issues (checked 2026-08-12)
 
-- **Bytecode version drift.** `sage --sgvm <src> -o out.sgvm` from the
-  installed compiler (4.1.8) produces a `.sgvm` (44 bytes for "hello")
-  that the SageVM v1.0.0 release binary reports as `Invalid constant
-  type: 4` / "768 constants". SageVM documents `>= 4.1.2` but its release
-  binaries and in-repo `.deps` toolchains are mutually inconsistent
-  (even `kernel.sgvm` fails on the vendored `core/sgvm`). Before Phase 8
-  lands, the pocket toolchain and SageVM must pin **one** SageLang commit
-  and rebuild SageVM's `--sgvm` path and engine together.
+- **Bytecode version drift (RESOLVED for the pocket).** `sage --sgvm`
+  emission changed between compiler versions (4.1.7 emits 40-byte files
+  with string constant type 0x0f, 4.1.8 emits 44-byte files with type
+  0x04) and neither parses under the SageVM v1.0.0 binaries ("Invalid
+  constant type: 4/15", "768 constants"; even `kernel.sgvm` fails on the
+  vendored `.deps/sgvm`). **The pocket does not use the outer compiler
+  for bytecode.** It uses the VM's self-hosting path instead:
+  `/usr/local/bin/sagevm compile` (installed binary) emits bytecode its
+  own engine parses — verified end-to-end in the pocket interpreter, see
+  `sgvm_smoke` in tests/run.sh. The upstream drift remains open as an
+  upstream coordination item (pin one SageLang commit and rebuild the
+  emitter + engine together).
+- **Vendored VM port seams.** The standalone relies on host-registered
+  names that only exist in the compiled binary (`sgvm_vm`, hexdump
+  modules) and on `thread.lock(g_gil)`. `tools/compose_sagevm.py`
+  applies three documented seams to the composed copy only; the vendored
+  file stays byte-identical for parity.
 - SageFS upstream is host-only (FUSE); if an embedded volume layer is
   ever wanted on the pocket it should be a new consumer, not a fork.
 

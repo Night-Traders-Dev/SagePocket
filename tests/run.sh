@@ -276,6 +276,47 @@ shell_smoke() {
     done
 }
 
+# --- sagevm smoke: vendored VM runs self-hosting bytecode in the interpreter
+
+sgvm_smoke() {
+    echo "== sagevm smoke test (vendored VM core in interpreter) =="
+    if ! command -v sagevm >/dev/null 2>&1; then
+        check "sagevm binary present" 1
+        return
+    fi
+    check "sagevm binary present" 0
+
+    mkdir -p build
+    if ! sagevm compile tests/fixtures/sgvm_demo.sage build/sgvm_demo.sgvm \
+            >/dev/null 2>"$SCRATCH/sgvm-compile.err"; then
+        check "sagevm compile fixture" 1
+        return
+    fi
+    check "sagevm compile fixture" 0
+
+    if ! python3 tools/compose_sagevm.py --with-driver sagevm/pocket_driver.sage \
+            -o "$SCRATCH/sgvm-composed.sage" 2>"$SCRATCH/compose.err"; then
+        check "compose vendored VM" 1
+        return
+    fi
+    check "compose vendored VM" 0
+
+    local out
+    if out="$("$SAGE" "$SCRATCH/sgvm-composed.sage" 2>"$SCRATCH/sgvm-run.err")"; then
+        check "composed VM runs in interpreter" 0
+    else
+        check "composed VM runs in interpreter" 1
+    fi
+    for expect in "fib(9)=34" "hello from sgvm" "guest program done" \
+                  "sgvm demo done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "sgvm output contains '$expect'" 0
+        else
+            check "sgvm output contains '$expect'" 1
+        fi
+    done
+}
+
 # --- compile checks: every Sage file must build for the target board --------
 
 compile_checks() {
@@ -302,6 +343,7 @@ else
     kernel_smoke
     sagefs_smoke
     shell_smoke
+    sgvm_smoke
     unit_tests
     compile_checks
 fi
