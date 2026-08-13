@@ -255,12 +255,33 @@ sagefs_smoke() {
     done
 }
 
+# --- shell smoke: SageShell demo runs in the interpreter --------------------
+
+shell_smoke() {
+    echo "== shell smoke test (SageShell REPL over SageFS) =="
+    local out
+    if out="$("$SAGE" shell/demo.sage 2>&1)"; then
+        check "shell demo runs" 0
+    else
+        check "shell demo runs" 1
+        return
+    fi
+    for expect in "prompt ok" "unknown cmd handled" "cat/mv ok" "df ok" \
+                  "demo done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "shell demo '$expect'" 0
+        else
+            check "shell demo '$expect'" 1
+        fi
+    done
+}
+
 # --- compile checks: every Sage file must build for the target board --------
 
 compile_checks() {
     echo "== pico compile checks (ARM) =="
     local f dir name
-    for f in boot/sageboot.sage kernel/hal.sage kernel/kernel.sage kernel/demo.sage drivers/lcd/st7789v3.sage drivers/sd/sd_spi.sage drivers/fs/fat32.sage; do
+    for f in boot/sageboot.sage kernel/hal.sage kernel/kernel.sage kernel/demo.sage drivers/lcd/st7789v3.sage drivers/sd/sd_spi.sage drivers/fs/fat32.sage shell/demo.sage; do
         name="$(basename "$f" .sage)"
         if "$SAGE" --compile-pico "$f" -o "$SCRATCH/$name" \
                 --name "$name" --board "$BOARD" --chip rp2350-arm \
@@ -280,6 +301,7 @@ else
     host_smoke
     kernel_smoke
     sagefs_smoke
+    shell_smoke
     unit_tests
     compile_checks
 fi

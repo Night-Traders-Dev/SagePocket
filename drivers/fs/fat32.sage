@@ -499,8 +499,11 @@ proc fat_write_dir_entry(name, cluster, size):
     return fat_write_dir_entry_in(FAT_ROOTCL, name, cluster, size,
                                   FAT_ATTR_ARCH)
 
-# fat_free_chain(cluster): mark every cluster in a chain free.
+# fat_free_chain(cluster): mark every cluster in a chain free. A zero
+# cluster (empty file, no data) is a no-op success.
 proc fat_free_chain(cluster):
+    if cluster < 2:
+        return true
     var chain = fat_cluster_chain(cluster)
     if chain == nil:
         return false
