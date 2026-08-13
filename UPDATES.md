@@ -6,6 +6,32 @@ while [CHANGELOG.md](CHANGELOG.md) tracks released changes.
 
 ---
 
+## 2026-08-12 — SageLang compiler fixes (v4.1.8) for the Phase 4/5 backend issues
+
+- After Phase 5, the two compiler limitations found during SageBoot/kernel
+  bring-up were fixed upstream in SageLang 4.1.8 (commit `5a7cbb4`, pushed
+  to github main) and installed with `sudo ./sagemake --install --skip-tests`:
+  - **`and`/`or` now short-circuit in the C backend** (`--compile`,
+    `--emit-c`, `--emit-pico-c`): the right operand is evaluated only when
+    the left does not decide the result, matching the interpreter. The
+    `best == nil or best["priority"] > 0` idiom no longer crashes; side
+    effects on the right no longer run unconditionally.
+  - **A module can be imported under multiple bindings**: `import m as a`
+    + `import m as b` in one program no longer errors with "unknown name"
+    nor emits duplicate C symbols (alias nodes share the primary module
+    AST; per-module emission passes skip them).
+  - The pre-existing hw.*/board-dir backend work from Phases 1-4 was
+    committed at the same time (it was still uncommitted in the SageLang
+    repo).
+- Regression tests added upstream: `compiler_logical_shortcircuit.sage`
+  (side-effect counting, nil-guards, value semantics, loop/cond usage) and
+  `compiler_modules_aliases.sage`; SageLang compiler suite passes, unit
+  suite 370 pass (16 pre-existing environmental failures, identical before
+  and after the fix).
+- SagePocket test suite re-run against the installed 4.1.8: 33 checks
+  passed, 0 failed. The nested-if guard pattern used in the kernel is
+  still fine and left unchanged.
+
 ## 2026-08-11 — Initial repository scaffolding (Phase 0 start)
 
 - Created the full repository layout defined in section 4 of `plan.md`:

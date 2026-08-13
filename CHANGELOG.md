@@ -40,6 +40,13 @@ The format follows common changelog practice; each release groups changes by
 - Host smoke tests now assert the Phase 4 boot flow; kernel demo smoke
   added (33 checks pass total).
 - `make arm` / `make rv` build the sageboot UF2s with the Phase 4 flow.
+- SageLang compiler upgraded to 4.1.8 (github main, commit `5a7cbb4`);
+  the upstream fixes remove the Phase 4/5 backend workarounds:
+  `and`/`or` short-circuit in compiled code exactly like the interpreter
+  (nil-guard idiom `x == nil or x[field] > 0` is now safe), and a module
+  may be imported under multiple aliases in one program without "unknown
+  name" errors or duplicate C symbols. Developer prerequisite is now
+  `sage >= 4.1.8`.
 
 ## [0.0.1] - 2026
 

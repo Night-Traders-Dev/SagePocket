@@ -109,7 +109,7 @@ SagePocket/
 ### 3.1 Prerequisites (verified 2026-08-11)
 
 ```text
-sage compiler         >= 4.1.7 with the hw.* and --board-dir features
+sage compiler         >= 4.1.8 with the hw.* and --board-dir features
                       (SageLang build; see plan.md Appendix)
 pico-sdk 2.1.0        at .deps/pico-sdk (fetched by pico_sdk_import.cmake)
 ARM:  arm-none-eabi-gcc       (multilib armv6-m/thumb)      -- chip rp2350-arm
