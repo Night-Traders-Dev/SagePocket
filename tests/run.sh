@@ -244,7 +244,9 @@ sagefs_smoke() {
         return
     fi
     for expect in "mounted 2 volumes" "hello read back: hello sagefs" \
-                  "big file read back 1000 bytes ok" "fd seek ok" "demo done"; do
+                  "big file read back 1000 bytes ok" "nested read ok" \
+                  "subdir listing ok" "rmdir verified" "fd seek ok" \
+                  "demo done"; do
         if echo "$out" | grep -qF "$expect"; then
             check "sagefs demo '$expect'" 0
         else

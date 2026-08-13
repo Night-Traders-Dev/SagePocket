@@ -210,11 +210,15 @@ proc fat_read_cluster(cluster):
 proc fat_entry_name(buf, off):
     if (buf[off + 11] & 0x0F) == FAT_ATTR_LFN:
         return ""
+    if buf[off] == 0xE5:
+        return ""
     var name = ""
     var i = 0
     while i < 8:
         var c = buf[off + i]
         if c == 0x20:
+            break
+        if c >= 0x80:
             break
         if c == 0x05:
             c = 0xE5
@@ -225,6 +229,8 @@ proc fat_entry_name(buf, off):
     while i < 11:
         var c = buf[off + i]
         if c == 0x20:
+            break
+        if c >= 0x80:
             break
         ext = ext + chr(c)
         i = i + 1
@@ -256,6 +262,9 @@ proc fat_list_dir(start):
             if name == "":
                 off = off + 32
                 continue
+            if name == "." or name == "..":
+                off = off + 32
+                continue
             var attr = secs[off + 11]
             var cl = fat_u16(secs, off + 26) | (fat_u16(secs, off + 20) << 16)
             var size = fat_u32(secs, off + 28)
@@ -282,6 +291,77 @@ proc fat_find_file(name):
 proc fat_find_dir(name):
     var entries = fat_ls()
     name = fat_upper_name(name)
+    var i = 0
+    while i < len(entries):
+        if entries[i]["name"] == name and (entries[i]["attr"] & FAT_ATTR_DIR) != 0:
+            return entries[i]
+        i = i + 1
+    return nil
+
+# fat_split(path): path components as an array; "/" yields [].
+proc fat_split(path):
+    var out = []
+    var cur = ""
+    var i = 0
+    while i < len(path):
+        var c = path[i]
+        if c == "/":
+            if cur != "":
+                push(out, cur)
+                cur = ""
+        else:
+            cur = cur + c
+        i = i + 1
+    if cur != "":
+        push(out, cur)
+    return out
+
+# fat_find_in(dir_cluster, name): entry named `name` in `dir_cluster`, or
+# nil. Case-insensitive like the rest of the driver.
+proc fat_find_in(dir_cluster, name):
+    var entries = fat_list_dir(dir_cluster)
+    name = fat_upper_name(name)
+    var i = 0
+    while i < len(entries):
+        if entries[i]["name"] == name:
+            return entries[i]
+        i = i + 1
+    return nil
+
+# fat_resolve_path(path): walk the path from the root directory, following
+# directory entries. Returns {"dir": parent cluster, "entry": entry or nil,
+# "name": uppercased final component, "path": components} or nil if any
+# intermediate component is missing/not a directory.
+proc fat_resolve_path(path):
+    var comps = fat_split(path)
+    if len(comps) == 0:
+        return {"dir": FAT_ROOTCL, "entry": nil, "name": "",
+                "path": comps}
+    var dir = FAT_ROOTCL
+    var e = nil
+    var pi = 0
+    while pi < len(comps):
+        var src = fat_list_dir(dir)
+        var name = fat_upper_name(comps[pi])
+        var found = nil
+        var i = 0
+        while i < len(src):
+            if src[i]["name"] == name:
+                found = src[i]
+            i = i + 1
+        if found == nil:
+            if pi == len(comps) - 1:
+                return {"dir": dir, "entry": nil, "name": name,
+                        "path": comps}
+            return nil
+        e = found
+        if pi == len(comps) - 1:
+            return {"dir": dir, "entry": e, "name": name, "path": comps}
+        if (e["attr"] & FAT_ATTR_DIR) == 0:
+            return nil
+        dir = e["cluster"]
+        pi = pi + 1
+    return {"dir": dir, "entry": e, "name": name, "path": comps}
 
 # fat_read_file(entry): file content as an array of bytes, nil on error.
 proc fat_read_file(entry):
@@ -334,10 +414,10 @@ proc fat_find_free_cluster():
         c = c + 1
     return 0
 
-# fat_write_dir_entry(name, cluster, size): create a root directory entry.
-# Searches the root chain for a free slot (0x00 or 0xE5). Returns true if
-# the entry was written. Root directory extension is not implemented.
-proc fat_write_dir_entry(name, cluster, size):
+# fat_make_entry(name, cluster, size, attr): a 32-byte 8.3 directory entry
+# with the given cluster, size and attribute (name uppercased). "." and
+# ".." are written verbatim (no base/ext split).
+proc fat_make_entry(name, cluster, size, attr):
     var base = ""
     var ext = ""
     var dot = -1
@@ -352,29 +432,43 @@ proc fat_write_dir_entry(name, cluster, size):
     else:
         base = name
     if len(base) > 8 or len(ext) > 3:
-        return false
+        return nil
     var e = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     var bi = 0
     while bi < 8:
         e[bi] = 0x20
         bi = bi + 1
     bi = 0
-    while bi < len(base):
-        e[bi] = fat_upper(ord(base[bi]))
-        bi = bi + 1
-    var ei = 8
-    while ei < 11:
-        e[ei] = 0x20
-        ei = ei + 1
-    ei = 8
-    while ei < 8 + len(ext):
-        e[ei] = fat_upper(ord(ext[ei - 8]))
-        ei = ei + 1
-    e[11] = FAT_ATTR_ARCH
+    if name == "." or name == "..":
+        e[0] = fat_upper(ord(name[0]))
+        if name == "..":
+            e[1] = fat_upper(ord(name[1]))
+    else:
+        while bi < len(base):
+            e[bi] = fat_upper(ord(base[bi]))
+            bi = bi + 1
+        var ei = 8
+        while ei < 11:
+            e[ei] = 0x20
+            ei = ei + 1
+        ei = 8
+        while ei < 8 + len(ext):
+            e[ei] = fat_upper(ord(ext[ei - 8]))
+            ei = ei + 1
+    e[11] = attr
     fat_put_u16(e, 26, cluster & 0xFFFF)
     fat_put_u16(e, 20, (cluster >> 16) & 0xFFFF)
     fat_put_u32(e, 28, size)
-    var chain = fat_cluster_chain(FAT_ROOTCL)
+    return e
+
+# fat_write_dir_entry_in(dir_cluster, name, cluster, size, attr): write an
+# entry into the directory rooted at dir_cluster (first free 0x00/0xE5
+# slot). Directory chain extension is not implemented.
+proc fat_write_dir_entry_in(dir_cluster, name, cluster, size, attr):
+    var e = fat_make_entry(name, cluster, size, attr)
+    if e == nil:
+        return false
+    var chain = fat_cluster_chain(dir_cluster)
     if chain == nil:
         return false
     var ci = 0
@@ -400,13 +494,113 @@ proc fat_write_dir_entry(name, cluster, size):
         ci = ci + 1
     return false
 
-# fat_write_file(name, data): create (or truncate) an 8.3-named file with
-# the given byte content in the root directory. Returns true on success.
-proc fat_write_file(name, data):
+# fat_write_dir_entry(name, cluster, size): root-level entry (ARCH file).
+proc fat_write_dir_entry(name, cluster, size):
+    return fat_write_dir_entry_in(FAT_ROOTCL, name, cluster, size,
+                                  FAT_ATTR_ARCH)
+
+# fat_free_chain(cluster): mark every cluster in a chain free.
+proc fat_free_chain(cluster):
+    var chain = fat_cluster_chain(cluster)
+    if chain == nil:
+        return false
+    var i = 0
+    while i < len(chain):
+        if not fat_set_cluster(chain[i], 0):
+            return false
+        i = i + 1
+    return true
+
+# fat_remove_entry(dir_cluster, name): mark a directory slot as deleted and
+# free the object's cluster chain.
+proc fat_remove_entry(dir_cluster, name):
+    var e = fat_find_in(dir_cluster, name)
+    if e == nil:
+        return false
+    var chain = fat_cluster_chain(dir_cluster)
+    if chain == nil:
+        return false
+    var ci = 0
+    while ci < len(chain):
+        var lba0 = fat_cluster_lba(chain[ci])
+        var si = 0
+        while si < FAT_SPC:
+            var sec = fat_read_block(lba0 + si)
+            if sec == nil:
+                return false
+            var off = 0
+            while off <= 480:
+                var ename = fat_entry_name(sec, off)
+                if ename != "" and fat_upper_name(ename) == fat_upper_name(e["name"]):
+                    sec[off] = 0xE5
+                    if not fat_write_block(lba0 + si, sec):
+                        return false
+                    return fat_free_chain(e["cluster"])
+                off = off + 32
+            si = si + 1
+        ci = ci + 1
+    return false
+
+# fat_mkdir_in(dir_cluster, name): create a subdirectory with "." and ".."
+# entries. The new directory is one cluster, no chain.
+proc fat_mkdir_in(dir_cluster, name):
+    if not _mounted:
+        return false
+    if fat_find_in(dir_cluster, name) != nil:
+        return false
+    var c = fat_find_free_cluster()
+    if c == 0:
+        return false
+    if not fat_set_cluster(c, FAT_EOC):
+        return false
+    var si = 0
+    while si < FAT_SPC:
+        var sec = []
+        var j = 0
+        while j < 512:
+            push(sec, 0)
+            j = j + 1
+        var dot = fat_make_entry(".", c, 0, FAT_ATTR_DIR)
+        var dotdot = fat_make_entry("..", dir_cluster, 0, FAT_ATTR_DIR)
+        if dot == nil or dotdot == nil:
+            return false
+        var k = 0
+        while k < 32:
+            sec[k] = dot[k]
+            sec[32 + k] = dotdot[k]
+            k = k + 1
+        if not fat_write_block(fat_cluster_lba(c) + si, sec):
+            return false
+        si = si + 1
+    return fat_write_dir_entry_in(dir_cluster, name, c, 0, FAT_ATTR_DIR)
+
+# fat_mkdir(name): create a root-level subdirectory.
+proc fat_mkdir(name):
+    return fat_mkdir_in(FAT_ROOTCL, name)
+
+# fat_rmdir_in(dir_cluster, name): remove an empty subdirectory.
+proc fat_rmdir_in(dir_cluster, name):
+    var e = fat_find_in(dir_cluster, name)
+    if e == nil:
+        return false
+    if (e["attr"] & FAT_ATTR_DIR) == 0:
+        return false
+    if len(fat_list_dir(e["cluster"])) != 0:
+        return false
+    return fat_remove_entry(dir_cluster, name)
+
+# fat_rmdir(name): remove an empty root-level subdirectory.
+proc fat_rmdir(name):
+    return fat_rmdir_in(FAT_ROOTCL, name)
+
+# fat_write_file_in(dir_cluster, name, data): create (or truncate) an
+# 8.3-named file with the given byte content in the directory rooted at
+# dir_cluster. Returns true on success.
+proc fat_write_file_in(dir_cluster, name, data):
     if not _mounted:
         return false
     if len(data) == 0:
-        return fat_write_dir_entry(name, 0, 0)
+        return fat_write_dir_entry_in(dir_cluster, name, 0, 0, FAT_ATTR_ARCH)
     var clusters = []
     var first = 0
     var prev = 0
@@ -441,4 +635,10 @@ proc fat_write_file(name, data):
     if prev != 0:
         if not fat_set_cluster(prev, FAT_EOC):
             return false
-    return fat_write_dir_entry(name, first, len(data))
+    return fat_write_dir_entry_in(dir_cluster, name, first, len(data),
+                                  FAT_ATTR_ARCH)
+
+# fat_write_file(name, data): create (or truncate) an 8.3-named file with
+# the given byte content in the root directory. Returns true on success.
+proc fat_write_file(name, data):
+    return fat_write_file_in(FAT_ROOTCL, name, data)

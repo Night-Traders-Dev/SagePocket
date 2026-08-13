@@ -80,6 +80,33 @@ proc demo_main():
     else:
         print "sagefs: stat hello FAILED"
 
+    # --- FAT32 backend: directories ----------------------------------------
+    # nested subdirectory: mkdir /docs, file inside it, list, cleanup
+    if not vfs.vfs_mkdir("/docs"):
+        print "sagefs: mkdir /docs FAILED"
+    var doc = vfs.vfs_str_to_bytes("nested file works")
+    if not vfs.vfs_write_bytes("/docs/notes.txt", doc):
+        print "sagefs: write nested FAILED"
+    var dgot = vfs.vfs_read_bytes("/docs/notes.txt")
+    if dgot != nil and vfs.vfs_bytes_to_str(dgot) == "nested file works":
+        print "sagefs: nested read ok"
+    else:
+        print "sagefs: nested read FAILED"
+    var dlist = vfs.vfs_list("/docs")
+    if len(dlist) == 1 and dlist[0]["name"] == "NOTES.TXT":
+        print "sagefs: subdir listing ok"
+    else:
+        print "sagefs: subdir listing FAILED len=" + str(len(dlist))
+    if vfs.vfs_remove("/docs/notes.txt") and vfs.vfs_remove("/docs"):
+        print "sagefs: subdir cleanup ok"
+    else:
+        print "sagefs: subdir cleanup FAILED"
+    var docsgone = vfs.vfs_stat("/docs")
+    if docsgone == nil:
+        print "sagefs: rmdir verified"
+    else:
+        print "sagefs: rmdir FAILED"
+
     # --- memfs backend: directories, seek, remove --------------------------
     vfs.vfs_mkdir("/tmp/work")
     var scratch = vfs.vfs_str_to_bytes("scratch data")

@@ -18,6 +18,14 @@ The format follows common changelog practice; each release groups changes by
   (`sagefs/demo.sage`) that exercises full round trips: write/read hello,
   10KB multi-cluster file, stat, fd seek, mkdir + scratch file in memfs,
   remove, cache hit/miss stats.
+- Phase 6 directories: FAT32 driver now builds and walks real directory
+  trees - `fat_mkdir`/`fat_mkdir_in` (with "." and ".." entries),
+  `fat_rmdir`/`fat_rmdir_in` (empty-directory removal), `fat_remove_entry`
+  (delete + cluster-chain freeing), `fat_resolve_path` (component-wise
+  lookup), `fat_write_file_in`/`fat_write_dir_entry_in` (target any
+  directory); the VFS FAT32 backend (`fatfs.sage`) routes every op through
+  path resolution, so `/dir/file` works end to end (nested write/read/
+  list/remove demos added to the demo).
 - Phase 6 sagefs smoke test (run.sh): runs the demo in the interpreter and
   asserts mount, hello read-back, multi-cluster read, fd seek, and clean
   completion; full suite now 39 checks, all passing.
@@ -54,7 +62,10 @@ The format follows common changelog practice; each release groups changes by
   match uppercased 8.3 directory entries; cluster allocation marks a
   cluster in-use (`FAT_EOC`) immediately so multi-cluster writes cannot
   re-select a just-written cluster and truncate the chain; the MBR/BPB
-  boot signature is written little-endian to agree with `fat_u16`.
+  boot signature is written little-endian to agree with `fat_u16`;
+  directory entries are stored with `"."`/`".."` written verbatim and
+  deleted/free entries parse safely (the interpreter's `chr` only handles
+  ASCII, so 0xE5 slots and high bytes are skipped instead of crashing).
 - Host smoke tests now assert the Phase 4 boot flow; kernel demo smoke
   added (33 checks pass total).
 - `make arm` / `make rv` build the sageboot UF2s with the Phase 4 flow.
