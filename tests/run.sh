@@ -315,6 +315,29 @@ sgvm_smoke() {
             check "sgvm output contains '$expect'" 1
         fi
     done
+
+    # Loader in the interpreter: payload written to and read back from the
+    # RAM-disk FAT32 volume, then executed by the vendored VM core.
+    if ! python3 tools/compose_sagevm.py --with-driver sagevm/loader.sage \
+            -o "$SCRATCH/sgvm-loader.sage" 2>"$SCRATCH/compose-loader.err"; then
+        check "compose loader" 1
+        return
+    fi
+    check "compose loader" 0
+    out=""
+    if out="$("$SAGE" "$SCRATCH/sgvm-loader.sage" 2>"$SCRATCH/sgvm-loader-run.err")"; then
+        check "loader demo runs in interpreter" 0
+    else
+        check "loader demo runs in interpreter" 1
+    fi
+    for expect in "loader: payload 319 bytes from /apps/HELLO.SGV" \
+                  "fib(9)=34" "guest program done" "loader done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "loader output contains '$expect'" 0
+        else
+            check "loader output contains '$expect'" 1
+        fi
+    done
 }
 
 # --- compile checks: every Sage file must build for the target board --------

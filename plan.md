@@ -3530,3 +3530,39 @@ New compiler features added alongside the prelude guards (all verified):
 - `tests: 33 passed, 0 failed`; host smoke adds kernel demo emit + gcc +
   run; compile checks cover kernel/ (hal, kernel, demo) plus boot, lcd,
   sd, fat32.
+
+## Phase 8 verified (2026-08-12)
+
+- Toolchain drift found and bypassed: `sage --sgvm` emission changed
+  between compiler versions (4.1.7: 40-byte files, string constant type
+  0x0f; 4.1.8: 44-byte files, type 0x04) and neither parses under the
+  SageVM v1.0.0 binaries (`Invalid constant type: 4/15`); the repo's own
+  .deps toolchain is internally inconsistent too. The pocket uses the
+  VM's self-hosting compiler instead: `/usr/local/bin/sagevm compile`
+  emits bytecode its own engine parses. Details and the upstream
+  coordination item in docs/reuse.md.
+- Vendored the authoritative single-file VM (`sagevm/sagevm.sage`,
+  5,408 lines, upstream main snapshot 2026-08-12) and proved the
+  execution gate in the interpreter: the composed VM runs the
+  self-hosted `sgvm_demo.sgvm` (fib recursion, strings, loops) and
+  prints `hello from sgvm`/`guest program done` with exit 0.
+- Port seams (applied to the composed copy only by
+  tools/compose_sagevm.py; the vendored file stays pristine): strip the
+  CLI auto-run tail (sys.args()[1] is the script path in the
+  interpreter), `sgvm_vm.MetalVM()` -> `MetalVM()` (host-registered
+  name that only exists in the compiled binary), GIL lock/unlock ->
+  no-ops (single-threaded interpreter), and run_file's `io.readbytes`
+  routed through a bytes override so payloads can come from a SageFS
+  volume instead of a host path.
+- Loader milestone: `sagevm/loader.sage` writes the 319-byte payload to
+  the RAM-disk FAT32 volume (`/apps/HELLO.SGV`), reads it back through
+  the VFS, and boots it via `SGVMRunner` with the bytes override - the
+  on-board flow (payload lives on the SD card, the VM never opens a
+  host path). Output: `loader: payload 319 bytes`,
+  `fib(9)=34`, `guest program done`, `loader done`.
+- Remaining for Phase 8 on-board acceptance: memory arena wrapper,
+  syscall (32 tables, caps) + GC ports, and `hello.sbc` running on the
+  board (bytecode vs. a `.sbc` container to be decided at that point).
+- `tests: 66 passed, 0 failed`; sgvm smoke covers compile by the
+  installed sagevm binary, composed-VM execution in the interpreter,
+  and the volume loader round-trip.

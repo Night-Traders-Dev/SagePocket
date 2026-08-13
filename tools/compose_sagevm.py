@@ -15,6 +15,11 @@ applied here to the composed COPY only:
   3. ``host_thread.lock/unlock(g_gil)`` -> pocket_gil_*() no-ops -
      the GIL guards multithreaded execution; the pocket interpreter is
      single-threaded and its thread module has no matching mutex API
+  4. ``run_file`` reads its input via ``io.readbytes(input_file)`` (host
+     path); the pocket's payloads live on a SageFS volume, so the read is
+     routed through ``pocket_load_override`` - when the runner's
+     ``pocket_bytes`` attribute is set (see sagevm/loader.sage) those
+     bytes are handed to the VM instead (default still hosts-read)
 
 Usage:
     tools/compose_sagevm.py [-o out.sage] [--with-driver sagevm/pocket_driver.sage]
@@ -29,11 +34,30 @@ SEAMS = [
     ("var metal_vm = sgvm_vm.MetalVM()", "var metal_vm = MetalVM()"),
     ("host_thread.lock(g_gil)", "pocket_gil_lock()"),
     ("host_thread.unlock(g_gil)", "pocket_gil_unlock()"),
+    (
+        "proc run_file(self, input_file, debug, safe_mode=false, ffi_enabled=true, user_args=nil):\n"
+        "        var data = io.readbytes(input_file)",
+        "proc run_file(self, input_file, debug, safe_mode=false, ffi_enabled=true, user_args=nil):\n"
+        "        var data = pocket_load_override(self, input_file)",
+    ),
 ]
 
 GIL_SHIMS = (
     "\nproc pocket_gil_lock():\n    var unused = 0\n\n"
     "proc pocket_gil_unlock():\n    var unused = 0\n"
+)
+
+BYTES_OVERRIDE_SHIM = (
+    "\nproc pocket_load_override(self, input_file):\n"
+    "    try:\n"
+    "        let b = self.pocket_bytes\n"
+    "    catch e:\n"
+    "        self.pocket_bytes = nil\n"
+    "        let b = nil\n"
+    "    if b != nil:\n"
+    "        self.pocket_bytes = nil\n"
+    "        return b\n"
+    "    return io.readbytes(input_file)\n"
 )
 
 
@@ -44,7 +68,7 @@ def compose(vendored: str, driver: str | None = None) -> str:
     for old, new in SEAMS:
         assert core.count(old) == 1, f"seam not found exactly once: {old!r}"
         core = core.replace(old, new)
-    out = core + GIL_SHIMS
+    out = core + GIL_SHIMS + BYTES_OVERRIDE_SHIM
     if driver:
         out += driver
     return out
