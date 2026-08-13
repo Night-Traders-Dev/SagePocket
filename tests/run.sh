@@ -374,6 +374,26 @@ sgvm_smoke() {
             check "caps output contains '$expect'" 1
         fi
     done
+
+    # Syscall table: guest sageos module reaches the pocket services in
+    # normal mode (version, VFS mounts, disk, power plus the delegated
+    # math bridge); in safe mode every host call is gated and the
+    # mounts/disk_free tiers are omitted from the module.
+    if ! sagevm compile tests/fixtures/sgvm_syscall.sage build/sgvm_syscall.sgvm \
+            >/dev/null 2>"$SCRATCH/sgvm-syscall-compile.err"; then
+        check "sagevm compile syscall fixture" 1
+        return
+    fi
+    check "sagevm compile syscall fixture" 0
+    for expect in "sv: sagepocket 0.2.0" "up: 1337" "mo: 0" \
+                  "df: 134217728" "abs: 5" "pow: ok" \
+                  "Direct host function call is restricted in safe mode"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "caps output contains '$expect'" 0
+        else
+            check "caps output contains '$expect'" 1
+        fi
+    done
 }
 
 # --- compile checks: every Sage file must build for the target board --------

@@ -3569,6 +3569,23 @@ New compiler features added alongside the prelude guards (all verified):
 - Boundary behavior: runaway guest recursion is cut at the engine's
   1024-frame limit ("Error: Call depth limit exceeded") without
   killing the VM; execution continues.
+- Syscall table milestone: the guest `sageos` module (new SVM
+  OP_IMPORT branch in the composed artifact) exposes the pocket
+  service table - version, uptime_ms, mounts (real SageFS VFS
+  query), disk_free, power - as host procs the engine delegates
+  to. The delegation bridge originally used host sys.call, which
+  does not exist under the pocket interpreter (guest math.abs and
+  every host-proc module entry silently returned nil); the
+  composed artifact replaces the two sys.call argc chains (plain
+  call + call_method module/object bridges) with the
+  pocket_host_call dispatcher and accepts the interpreter's
+  "native" callee type. The upstream call_method bridge had NO
+  safe-mode gate (safe guests could still reach host procs via
+  method syntax); the pocket seams add the gate, and the sageos
+  table itself omits mounts/disk_free under safe_mode (cap tiers
+  by omission). Verified: normal mode full table + math.abs via
+  the bridge; safe mode all host calls denied, missing tiers
+  error cleanly.
 - Remaining for Phase 8 on-board acceptance: syscall (32 tables,
   caps) + GC ports, and `hello.sbc` running on the board (bytecode
   vs. a `.sbc` container to be decided at that point).

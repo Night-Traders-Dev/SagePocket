@@ -15,6 +15,14 @@ proc pocket_sgvm_caps():
     let r3 = SGVMRunner()
     r3.run_file("build/sgvm_depth.sgvm", false)
 
+    print "== caps: syscall table =="
+    let r4 = SGVMRunner()
+    r4.run_file("build/sgvm_syscall.sgvm", false)
+
+    print "== caps: syscall safe =="
+    let r5 = SGVMRunner()
+    r5.run_file("build/sgvm_syscall.sgvm", false, true)
+
     print "caps done"
 
 pocket_sgvm_caps()
