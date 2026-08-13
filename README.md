@@ -68,18 +68,38 @@ See [docs/development.md](docs/development.md) for the developer guide and
 
 ## Status
 
-SagePocket is at **version 0.1.0** (architecture / implementation plan).
-The immediate focus is **Phases 0–3**: repository + build system, hardware
-bring-up, LCD, and SD card — the hardware foundation for everything else.
+SagePocket is at **version 0.2.0**. Phases 0–7 are complete and verified;
+Phase 8 (SageVM port) has its bytecode execution gate proven inside the
+pocket interpreter.
 
 Current milestone progress:
 
 - [x] Repository scaffolding
-- [ ] Phase 0 — Repository, build system, documentation, test framework
-- [ ] Phase 1 — Hardware bring-up (GPIO, clock, UART, LED, temperature)
-- [ ] Phase 2 — LCD (ST7789V3, framebuffer, text, graphics)
-- [ ] Phase 3 — SD card (SPI SD, block device, FAT32)
-- [ ] Phase 4 — SageBoot (boot menu, loader, recovery, diagnostics)
+- [x] Phase 0 — Repository, build system, documentation, test framework
+- [x] Phase 1 — Hardware bring-up (GPIO, clock, UART, LED, temperature)
+- [x] Phase 2 — LCD (ST7789V3, framebuffer, text, graphics)
+- [x] Phase 3 — SD card (SPI SD, block device, FAT32)
+- [x] Phase 4 — SageBoot (boot menu, loader, recovery, diagnostics)
+- [x] Phase 5 — SageOS kernel (scheduler, memory, IPC, syscalls)
+- [x] Phase 6 — SageFS (VFS + FAT32 over RAM)
+- [x] Phase 7 — SageShell (REPL + command set over SageFS)
+- [~] Phase 8 — SageVM (bytecode gate: vendored VM runs self-hosting
+      bytecode in the interpreter; loader / memory / syscalls / GC in
+      progress)
+
+The full test suite runs with `tests/run.sh` (66 checks, 0 failures:
+boot bring-up host smoke, kernel scheduler demo, SageFS + shell demos,
+VM bytecode round-trip smoke, unit tests, and ARM compile checks for the
+RP2350 target).
+
+Toolchain: `sage >= 4.1.8` plus the `sagevm` binary from
+[SageVM](https://github.com/Night-Traders-Dev/SageVM) for bytecode
+compilation. Component reuse across the sibling repos is mapped in
+[docs/reuse.md](docs/reuse.md).
+
+Phases 9–16 (applications, GUI, packages, multicore, RISC-V, retro
+emulators, native compilation, native SageFS) remain on the roadmap —
+see [plan.md](plan.md).
 
 ## Design Principles
 
