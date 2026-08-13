@@ -6,3 +6,6 @@ build/
 *.elf
 *.img
 __pycache__/
+*.sgvm
+*.srvm
+*.svm
