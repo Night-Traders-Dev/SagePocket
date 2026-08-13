@@ -151,6 +151,64 @@ STUBHW
     done
 }
 
+# --- kernel smoke: SageOS scheduler demo runs on host stubs -----------------
+
+kernel_smoke() {
+    echo "== kernel smoke test (SageOS scheduler demo) =="
+    local c="$SCRATCH/kdemo.c"
+    if ! "$SAGE" --emit-pico-c kernel/demo.sage -o "$c" 2>"$SCRATCH/kdemo.err"; then
+        check "emit kernel demo C" 1
+        return
+    fi
+    check "emit kernel demo C" 0
+
+    python3 - "$c" << 'PYEOF'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = '''#include <stdint.h>
+#include "pico/stdlib.h"
+#include "hardware/adc.h"
+#include "hardware/clocks.h"
+#include "hardware/pio.h"
+#include "hardware/spi.h"'''
+new = '''#include <stdint.h>
+#include <math.h>
+#include <setjmp.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <dlfcn.h>
+#include <stdatomic.h>
+#include <semaphore.h>
+#include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+#include "stub_hw.h"
+#include "stubs.h"'''
+assert old in src, "pico include block not found"
+open(path, "w").write(src.replace(old, new))
+PYEOF
+
+    if ! gcc -std=c11 -O0 -w "$c" "$SCRATCH/stubs.c" -o "$SCRATCH/kdemo-host" -lm -lpthread -ldl 2>"$SCRATCH/kdemo-gcc.err"; then
+        check "compile kernel demo host" 1
+        return
+    fi
+    check "compile kernel demo host" 0
+
+    local out
+    out="$(timeout 20 "$SCRATCH/kdemo-host" 2>&1)"
+    for expect in "alpha: tick 100" "demo: alpha=100 beta=20 delivered=20" "demo: done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "kdemo output contains '$expect'" 0
+        else
+            check "kdemo output contains '$expect'" 1
+        fi
+    done
+}
+
 # --- unit tests: pure-Sage files run in the interpreter --------------------
 
 unit_tests() {
@@ -179,7 +237,7 @@ unit_tests() {
 compile_checks() {
     echo "== pico compile checks (ARM) =="
     local f dir name
-    for f in boot/sageboot.sage kernel/hal.sage drivers/lcd/st7789v3.sage drivers/sd/sd_spi.sage drivers/fs/fat32.sage; do
+    for f in boot/sageboot.sage kernel/hal.sage kernel/kernel.sage kernel/demo.sage drivers/lcd/st7789v3.sage drivers/sd/sd_spi.sage drivers/fs/fat32.sage; do
         name="$(basename "$f" .sage)"
         if "$SAGE" --compile-pico "$f" -o "$SCRATCH/$name" \
                 --name "$name" --board "$BOARD" --chip rp2350-arm \
@@ -197,6 +255,7 @@ if [ "${1:-}" = "host" ]; then
     host_smoke
 else
     host_smoke
+    kernel_smoke
     unit_tests
     compile_checks
 fi

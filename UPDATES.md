@@ -49,3 +49,21 @@ implementation order in `plan.md` §73.
 - SD image validated: SAGEOS.KRN written with tests/mkimg.py, fsck.fat
   clean, file content md5 matches on loop mount.
 - Committed as bb5df37 (phase 3 final) + phase 4 work.
+
+## 2026-08-12 — Phase 5: SageOS kernel (scheduler, tasks, memory, IPC, timers, interrupts, syscalls)
+
+- Wrote the kernel as pure-Sage modules under kernel/ (scheduler, process,
+  timer, memory, ipc, interrupt, syscall, kernel entry) - the same code
+  runs in the interpreter, the host smoke harness, and on the pico.
+- Cooperative priority round-robin: sched_dispatch runs one quantum of the
+  highest-priority READY task; sleepers and blocked receivers aren't
+  scheduled until woken by the kernel. Virtual clock keeps tests
+  deterministic.
+- kernel/demo.sage: 3 concurrent tasks (alpha ticks to 100, beta sleeps
+  30 ms x 20, producer/consumer exchange 20 mailbox messages) - the Phase 5
+  exit criterion "multiple SageOS tasks run simultaneously".
+- Compiler backend gotchas hit and worked around: `or`/`and` don't
+  short-circuit in emitted C (nil deref crashes), and module members are
+  fully namespaced (module.proc()).
+- Test suite grew to 33 checks (kernel demo host smoke + kernel unit test +
+  kernel compile checks); make arm/rv still build sageboot UF2s.

@@ -8,6 +8,16 @@ The format follows common changelog practice; each release groups changes by
 
 ### Added
 
+- Phase 5 (SageOS kernel, `kernel/`): cooperative priority-based
+  round-robin scheduler, task registry (create/exit/wake), virtual ms
+  clock + one-shot timers, lowest-fit block memory allocator, IPC
+  mailboxes with blocking receive, software IRQ manager with masking +
+  deferred work, syscall table dispatcher; `kernel/demo.sage` runs 3
+  concurrent tasks (alpha ticks, beta sleeps, producer/consumer over a
+  mailbox) on host and pico.
+- Phase 5 kernel smoke test (run.sh): emits + compiles + runs the demo on
+  host stubs and asserts task counts; unit test `tests/unit/scheduler.sage`
+  covers task counts, sleep wake, mailbox handoff.
 - Phase 4: boot menu (boot kernel / recovery / diagnostics / halt) in
   `boot/sageboot.sage` v0.4.0, kernel loader for `SAGEOS.KRN` from SD+FAT32
   (size + CRC16 verify), recovery re-diagnostics, UART0 menu input with
@@ -27,7 +37,8 @@ The format follows common changelog practice; each release groups changes by
 
 ### Changed
 
-- Host smoke tests now assert the Phase 4 boot flow; 25 checks pass.
+- Host smoke tests now assert the Phase 4 boot flow; kernel demo smoke
+  added (33 checks pass total).
 - `make arm` / `make rv` build the sageboot UF2s with the Phase 4 flow.
 
 ## [0.0.1] - 2026

@@ -1,6 +1,6 @@
 # SagePocket Developer Guide
 
-> **Version:** 0.4.0 · **Status:** Phase 0-2 complete; Phase 3 (SD+FAT32) drivers committed; Phase 4 (boot menu, kernel loader, recovery) code complete; Phase 5+ pending
+> **Version:** 0.5.0 · **Status:** Phases 0-4 complete; Phase 5 (SageOS kernel: scheduler, tasks, timers, memory, IPC, interrupts, syscalls) implemented; Phase 6+ pending
 
 This document describes how SagePocket is built, tested, and developed: the
 repository reference, development phases, build system plan, testing

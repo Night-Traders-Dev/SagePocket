@@ -3502,3 +3502,31 @@ New compiler features added alongside the prelude guards (all verified):
 - SD card image build validated: 64 MB image, `SAGEOS.KRN` (2,048 bytes)
   injected with `mkimg.py`, verified with `fsck.fat` and by mounting the
   image (content md5 matches the source payload).
+
+## Phase 5 verified (2026-08-12)
+
+- Cooperative, priority-based round-robin kernel written in pure Sage under
+  `kernel/` (imports resolve from the repo root like the boot modules):
+  process (TCB registry, create/exit/wake), scheduler (priority + rotation,
+  one quantum per dispatch), timer (virtual ms clock, one-shot timers),
+  memory (lowest-fit block allocator, header-merge free), ipc (mailboxes,
+  blocking receive via TASK_BLOCKED), interrupt (software IRQ table, mask,
+  deferred job queue), syscall (nr -> handler dispatcher), kernel (init,
+  bounded kernel_run(steps), task_sleep/task_exit, panic).
+- The kernel uses an explicit virtual clock (kernel/timer.sage) instead of
+  hw.uptime_ms so the same code runs in the interpreter, the host smoke
+  harness, and on the pico - and scheduler tests are deterministic.
+- Language constraints found while building it: `or`/`and` do NOT
+  short-circuit in the compiled pico backend (both operands evaluate), so
+  `x == nil or x.field > 0` crashes; the fixed pattern is nested if/elif.
+  Module globals/procs are namespaced (call `module.proc()`), dict-stored
+  procs work in this build (they failed a previous issue and were
+  re-verified).
+- Exit criteria met in the host smoke (`kernel/demo.sage`): alpha task
+  ticks to 100, beta sleeps 30 ms x20 rounds and completes, mailboxes
+  deliver 20 items between producer and consumer - all run simultaneously
+  in one scheduler loop; the pico ARM build (kernel/demo.sage) produces a
+  UF2 that runs the same demo on hardware.
+- `tests: 33 passed, 0 failed`; host smoke adds kernel demo emit + gcc +
+  run; compile checks cover kernel/ (hal, kernel, demo) plus boot, lcd,
+  sd, fat32.
