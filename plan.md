@@ -3560,9 +3560,18 @@ New compiler features added alongside the prelude guards (all verified):
   on-board flow (payload lives on the SD card, the VM never opens a
   host path). Output: `loader: payload 319 bytes`,
   `fib(9)=34`, `guest program done`, `loader done`.
-- Remaining for Phase 8 on-board acceptance: memory arena wrapper,
-  syscall (32 tables, caps) + GC ports, and `hello.sbc` running on the
-  board (bytecode vs. a `.sbc` container to be decided at that point).
+- Memory + caps milestone verified (`sagevm/caps_driver.sage`): guest
+  `import mem` round-trips through the engine's `__builtin_mem_*`
+  bridge onto the interpreter's native typed arena - alloc(64),
+  write(p, 0, "int", 65), read back 65, size 64, free. In safe
+  mode the engine denies the module itself ("Access to module
+  'mem' is restricted in safe mode").
+- Boundary behavior: runaway guest recursion is cut at the engine's
+  1024-frame limit ("Error: Call depth limit exceeded") without
+  killing the VM; execution continues.
+- Remaining for Phase 8 on-board acceptance: syscall (32 tables,
+  caps) + GC ports, and `hello.sbc` running on the board (bytecode
+  vs. a `.sbc` container to be decided at that point).
 - `tests: 66 passed, 0 failed`; sgvm smoke covers compile by the
   installed sagevm binary, composed-VM execution in the interpreter,
   and the volume loader round-trip.

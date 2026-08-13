@@ -61,6 +61,7 @@ BYTES_OVERRIDE_SHIM = (
 )
 
 
+
 def compose(vendored: str, driver: str | None = None) -> str:
     idx = vendored.rfind("\nimport sys\n")
     assert idx > 0, "vendor auto-run tail marker not found"

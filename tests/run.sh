@@ -338,6 +338,42 @@ sgvm_smoke() {
             check "loader output contains '$expect'" 1
         fi
     done
+
+    # Caps in the interpreter: the arena bridge round-trips through the
+    # native mem API in normal mode, the engine denies mem in safe mode,
+    # and the call-depth boundary errors cleanly without killing the VM.
+    if ! sagevm compile tests/fixtures/sgvm_mem.sage build/sgvm_mem.sgvm \
+            >/dev/null 2>"$SCRATCH/sgvm-mem-compile.err"; then
+        check "sagevm compile mem fixture" 1
+        return
+    fi
+    check "sagevm compile mem fixture" 0
+    if ! sagevm compile tests/fixtures/sgvm_depth.sage build/sgvm_depth.sgvm \
+            >/dev/null 2>"$SCRATCH/sgvm-depth-compile.err"; then
+        check "sagevm compile depth fixture" 1
+        return
+    fi
+    check "sagevm compile depth fixture" 0
+    if ! python3 tools/compose_sagevm.py --with-driver sagevm/caps_driver.sage \
+            -o "$SCRATCH/sgvm-caps.sage" 2>"$SCRATCH/compose-caps.err"; then
+        check "compose caps driver" 1
+        return
+    fi
+    check "compose caps driver" 0
+    if out="$("$SAGE" "$SCRATCH/sgvm-caps.sage" 2>"$SCRATCH/sgvm-caps-run.err")"; then
+        check "caps demo runs in interpreter" 0
+    else
+        check "caps demo runs in interpreter" 1
+    fi
+    for expect in "read back: 65" "size: 64" \
+                  "Access to module 'mem' is restricted in safe mode" \
+                  "Call depth limit exceeded" "caps done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "caps output contains '$expect'" 0
+        else
+            check "caps output contains '$expect'" 1
+        fi
+    done
 }
 
 # --- compile checks: every Sage file must build for the target board --------
