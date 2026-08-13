@@ -8,6 +8,19 @@ The format follows common changelog practice; each release groups changes by
 
 ### Added
 
+- Phase 6 (SageFS, `sagefs/`): VFS layer (normalized paths, mount points,
+  stat/list/mkdir/remove/sync, file descriptors with open/read/write/seek/
+  close), FAT32 backend (`fatfs.sage`) over the existing `drivers/fs/fat32`
+  driver, memfs RAM-backed volume for `/tmp`, write-through LRU block cache
+  (parallel key/value arrays - the interpreter does not support numeric
+  dict keys), FAT32 image builder (`mkfs.sage`), RAM block device
+  (`block.sage`), inode structs, and an interpreter-runnable demo
+  (`sagefs/demo.sage`) that exercises full round trips: write/read hello,
+  10KB multi-cluster file, stat, fd seek, mkdir + scratch file in memfs,
+  remove, cache hit/miss stats.
+- Phase 6 sagefs smoke test (run.sh): runs the demo in the interpreter and
+  asserts mount, hello read-back, multi-cluster read, fd seek, and clean
+  completion; full suite now 39 checks, all passing.
 - Phase 5 (SageOS kernel, `kernel/`): cooperative priority-based
   round-robin scheduler, task registry (create/exit/wake), virtual ms
   clock + one-shot timers, lowest-fit block memory allocator, IPC
@@ -37,6 +50,11 @@ The format follows common changelog practice; each release groups changes by
 
 ### Changed
 
+- FAT32 driver: lookups are now case-insensitive (`fat_upper_name`) to
+  match uppercased 8.3 directory entries; cluster allocation marks a
+  cluster in-use (`FAT_EOC`) immediately so multi-cluster writes cannot
+  re-select a just-written cluster and truncate the chain; the MBR/BPB
+  boot signature is written little-endian to agree with `fat_u16`.
 - Host smoke tests now assert the Phase 4 boot flow; kernel demo smoke
   added (33 checks pass total).
 - `make arm` / `make rv` build the sageboot UF2s with the Phase 4 flow.

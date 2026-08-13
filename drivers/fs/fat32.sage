@@ -1,4 +1,9 @@
-# drivers/fs/fat32.sage - FAT32 filesystem (read + basic write) over SD.
+# drivers/fs/fat32.sage - FAT32 filesystem (read + basic write).
+#
+# Reads and writes go through a block-device indirection: by default the
+# SD card driver (drivers/sd/sd_spi.sage), but any device exposing the
+# standard block-device interface (bd_read/bd_write) can be substituted
+# with fat_set_blockdev() - e.g. a RAM disk for host-side tests.
 #
 # FAT32 layout used here:
 #   - sector 0 is an MBR (partition LBA from entry 1) or a superfloppy BPB
@@ -14,6 +19,7 @@
 import drivers.sd.sd_spi as sd
 
 var _mounted = false
+var _bd = nil
 var FAT_BS = 0
 var FAT_SPC = 1
 var FAT_RESV = 0
@@ -23,6 +29,31 @@ var FAT_ROOTCL = 2
 var FAT_DATALBA = 0
 var FAT_FATLBA = 0
 var FAT_TOTSECT = 0
+
+# --- block device indirection ----------------------------------------------
+
+# fat_set_blockdev(dev): route all block I/O through the given device
+# (must expose bd_read(blockno) and bd_write(blockno, data)). Passing nil
+# restores the default SD card backend.
+proc fat_set_blockdev(dev):
+    _bd = dev
+
+proc fat_blockdev():
+    return _bd
+
+# fat_read_block(lba): one 512-byte sector via the active backend.
+proc fat_read_block(lba):
+    if _bd == nil:
+        return sd.sd_read_block(lba)
+    var rf = _bd["bd_read"]
+    return rf(lba)
+
+# fat_write_block(lba, data): one 512-byte sector via the active backend.
+proc fat_write_block(lba, data):
+    if _bd == nil:
+        return sd.sd_write_block(lba, data)
+    var wf = _bd["bd_write"]
+    return wf(lba, data)
 
 var FAT_ATTR_RO = 0x01
 var FAT_ATTR_HIDDEN = 0x02
@@ -58,18 +89,28 @@ proc fat_upper(c):
         return c - 32
     return c
 
+# fat_upper_name(s): full string uppercased (FAT directory names are stored
+# uppercased, so lookups must be case-insensitive).
+proc fat_upper_name(s):
+    var out = ""
+    var i = 0
+    while i < len(s):
+        out = out + chr(fat_upper(ord(s[i])))
+        i = i + 1
+    return out
+
 proc fat_mounted():
     return _mounted
 
 # fat_mount(): locate the FAT32 partition and parse its BPB.
 proc fat_mount():
-    var s0 = sd.sd_read_block(0)
+    var s0 = fat_read_block(0)
     if s0 == nil:
         return false
     var pstart = 0
     if fat_u16(s0, 510) == 0x55AA:
         pstart = fat_u32(s0, 454)
-    var bpb = sd.sd_read_block(pstart)
+    var bpb = fat_read_block(pstart)
     if bpb == nil:
         return false
     if fat_u16(bpb, 510) != 0x55AA:
@@ -106,7 +147,7 @@ proc fat_cluster_lba(cluster):
 # fat_next_cluster(cluster): FAT entry value; -1 on read error.
 proc fat_next_cluster(cluster):
     var off = cluster * 4
-    var sec = sd.sd_read_block(FAT_FATLBA + off / 512)
+    var sec = fat_read_block(FAT_FATLBA + off / 512)
     if sec == nil:
         return -1
     return fat_u32(sec, off % 512) & 0x0FFFFFFF
@@ -115,7 +156,7 @@ proc fat_next_cluster(cluster):
 proc fat_set_cluster(cluster, value):
     var off = cluster * 4
     var rel = off / 512
-    var sec = sd.sd_read_block(FAT_FATLBA + rel)
+    var sec = fat_read_block(FAT_FATLBA + rel)
     if sec == nil:
         return false
     var o = off % 512
@@ -123,7 +164,7 @@ proc fat_set_cluster(cluster, value):
     fat_put_u32(sec, o, v)
     var f = 0
     while f < FAT_NFATS:
-        if not sd.sd_write_block(FAT_FATLBA + f * FAT_FATSZ + rel, sec):
+        if not fat_write_block(FAT_FATLBA + f * FAT_FATSZ + rel, sec):
             return false
         f = f + 1
     return true
@@ -152,7 +193,7 @@ proc fat_read_cluster(cluster):
     var out = []
     var i = 0
     while i < FAT_SPC:
-        var s = sd.sd_read_block(fat_cluster_lba(cluster) + i)
+        var s = fat_read_block(fat_cluster_lba(cluster) + i)
         if s == nil:
             return nil
         var j = 0
@@ -230,6 +271,7 @@ proc fat_ls():
 
 proc fat_find_file(name):
     var entries = fat_ls()
+    name = fat_upper_name(name)
     var i = 0
     while i < len(entries):
         if entries[i]["name"] == name and (entries[i]["attr"] & FAT_ATTR_DIR) == 0:
@@ -239,12 +281,7 @@ proc fat_find_file(name):
 
 proc fat_find_dir(name):
     var entries = fat_ls()
-    var i = 0
-    while i < len(entries):
-        if entries[i]["name"] == name and (entries[i]["attr"] & FAT_ATTR_DIR) != 0:
-            return entries[i]
-        i = i + 1
-    return nil
+    name = fat_upper_name(name)
 
 # fat_read_file(entry): file content as an array of bytes, nil on error.
 proc fat_read_file(entry):
@@ -345,7 +382,7 @@ proc fat_write_dir_entry(name, cluster, size):
         var lba0 = fat_cluster_lba(chain[ci])
         var si = 0
         while si < FAT_SPC:
-            var sec = sd.sd_read_block(lba0 + si)
+            var sec = fat_read_block(lba0 + si)
             if sec == nil:
                 return false
             var off = 0
@@ -355,7 +392,7 @@ proc fat_write_dir_entry(name, cluster, size):
                     while j < 32:
                         sec[off + j] = e[j]
                         j = j + 1
-                    if not sd.sd_write_block(lba0 + si, sec):
+                    if not fat_write_block(lba0 + si, sec):
                         return false
                     return true
                 off = off + 32
@@ -378,6 +415,8 @@ proc fat_write_file(name, data):
         var c = fat_find_free_cluster()
         if c == 0:
             return false
+        if not fat_set_cluster(c, FAT_EOC):
+            return false
         if first == 0:
             first = c
         if prev != 0:
@@ -395,7 +434,7 @@ proc fat_write_file(name, data):
                     push(sec, 0)
                 off = off + 1
                 j = j + 1
-            if not sd.sd_write_block(lba0 + si, sec):
+            if not fat_write_block(lba0 + si, sec):
                 return false
             si = si + 1
         prev = c

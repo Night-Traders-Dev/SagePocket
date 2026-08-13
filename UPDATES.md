@@ -6,6 +6,35 @@ while [CHANGELOG.md](CHANGELOG.md) tracks released changes.
 
 ---
 
+## 2026-08-12 — Phase 6: SageFS VFS, FAT32 backend, memfs, block cache
+
+- Added `sagefs/` implementing the filesystem layer from `plan.md`:
+  `vfs.sage` (mount table, resolve/norm, stat, list, mkdir, remove, sync,
+  fd table with open/read/write/seek/close), `fatfs.sage` (FAT32 backend
+  ops over `drivers/fs/fat32.sage`), `memfs.sage` (RAM volume for `/tmp`),
+  `block.sage` (512-byte RAM block device), `mkfs.sage` (minimal FAT32
+  image: MBR + BPB + FAT with root marked EOC), `inode.sage`, and a
+  `cache.sage` read/write-through LRU block cache.
+- Interpreter constraints that shaped the implementation:
+  - **Numeric dict keys are rejected** ("Invalid index assignment" +
+    FOOBAR debug crash), so the cache uses parallel key/value arrays and
+    linear index scans; the kernel registry used the same array idiom.
+  - Early `sagefs/demo.sage` failures were chased down to three bugs:
+    the cache hit path returned `_c_vals[idx]` *after* the LRU touch had
+    rebuilt the arrays (returned a neighboring block), the mkfs boot
+    signature was stored byte-swapped (`fat_u16(sec,510) != 0x55AA`),
+    and FAT lookups compared exact case against uppercased 8.3 entries.
+  - Worst bug: multi-cluster file writes silently truncated to 3 clusters
+    because `fat_find_free_cluster()` re-selected the cluster just written
+    (its FAT entry was still 0 until the *next* iteration linked it),
+    producing self-links and losing data. Fix: mark clusters `FAT_EOC`
+    at allocation and link afterwards. This also makes the FAT consistent
+    after a crash mid-write.
+- `tests/run.sh` gained `sagefs_smoke`; full suite 39 checks pass, demo
+  green in the interpreter (also runs on host stubs / pico unchanged).
+
+---
+
 ## 2026-08-12 — SageLang compiler fixes (v4.1.8) for the Phase 4/5 backend issues
 
 - After Phase 5, the two compiler limitations found during SageBoot/kernel

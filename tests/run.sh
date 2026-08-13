@@ -232,6 +232,27 @@ unit_tests() {
     done
 }
 
+# --- sagefs smoke: SageFS demo runs in the interpreter ----------------------
+
+sagefs_smoke() {
+    echo "== sagefs smoke test (VFS + FAT32 over RAM disk) =="
+    local out
+    if out="$("$SAGE" sagefs/demo.sage 2>&1)"; then
+        check "sagefs demo runs" 0
+    else
+        check "sagefs demo runs" 1
+        return
+    fi
+    for expect in "mounted 2 volumes" "hello read back: hello sagefs" \
+                  "big file read back 1000 bytes ok" "fd seek ok" "demo done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "sagefs demo '$expect'" 0
+        else
+            check "sagefs demo '$expect'" 1
+        fi
+    done
+}
+
 # --- compile checks: every Sage file must build for the target board --------
 
 compile_checks() {
@@ -256,6 +277,7 @@ if [ "${1:-}" = "host" ]; then
 else
     host_smoke
     kernel_smoke
+    sagefs_smoke
     unit_tests
     compile_checks
 fi
