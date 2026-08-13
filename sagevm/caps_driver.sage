@@ -23,6 +23,10 @@ proc pocket_sgvm_caps():
     let r5 = SGVMRunner()
     r5.run_file("build/sgvm_syscall.sgvm", false, true)
 
+    print "== caps: gc churn and arena bounds =="
+    let r6 = SGVMRunner()
+    r6.run_file("build/sgvm_gc.sgvm", false)
+
     print "caps done"
 
 pocket_sgvm_caps()

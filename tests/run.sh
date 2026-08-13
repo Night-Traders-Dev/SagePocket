@@ -394,6 +394,25 @@ sgvm_smoke() {
             check "caps output contains '$expect'" 1
         fi
     done
+
+    # GC + arena bounds: allocation churn keeps object integrity (sum
+    # 3045 across enable/disable boundaries), gc.stats bridges, and
+    # out-of-bounds / double-free arena access degrades to nil instead
+    # of crashing the VM.
+    if ! sagevm compile tests/fixtures/sgvm_gc.sage build/sgvm_gc.sgvm \
+            >/dev/null 2>"$SCRATCH/sgvm-gc-compile.err"; then
+        check "sagevm compile gc fixture" 1
+        return
+    fi
+    check "sagevm compile gc fixture" 0
+    for expect in "churn ok: 3045" "gc stats: 0" "oob read: nil" \
+                  "oob write: nil" "double free: nil" "gc demo done"; do
+        if echo "$out" | grep -qF "$expect"; then
+            check "caps output contains '$expect'" 0
+        else
+            check "caps output contains '$expect'" 1
+        fi
+    done
 }
 
 # --- compile checks: every Sage file must build for the target board --------

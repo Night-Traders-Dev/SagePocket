@@ -44,6 +44,10 @@ SEAMS = [
     ("host_thread.lock(g_gil)", "pocket_gil_lock()"),
     ("host_thread.unlock(g_gil)", "pocket_gil_unlock()"),
     (
+        '                    elif name == "mem": push(self.stack, self.globals["mem"])\n',
+        '                    elif name == "gc": push(self.stack, self.globals["gc"])\n                    elif name == "mem": push(self.stack, self.globals["mem"])\n',
+    ),
+    (
         "elif type(callee) == \"function\" or type(callee) == \"native fn\":",
         "elif type(callee) == \"function\" or type(callee) == \"native fn\" or type(callee) == \"native\":",
     ),

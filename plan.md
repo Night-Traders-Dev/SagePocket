@@ -3586,9 +3586,17 @@ New compiler features added alongside the prelude guards (all verified):
   by omission). Verified: normal mode full table + math.abs via
   the bridge; safe mode all host calls denied, missing tiers
   error cleanly.
-- Remaining for Phase 8 on-board acceptance: syscall (32 tables,
-  caps) + GC ports, and `hello.sbc` running on the board (bytecode
-  vs. a `.sbc` container to be decided at that point).
+- GC milestone: the guest `gc` module (new SVM OP_IMPORT arm) reaches
+  the engine's collect/stats/enable/disable surface. Verified under
+  churn: 40x20 dict builds with gc disabled, 30-object retention
+  with gc enabled, integrity sum 3045 - stable, no leak crashes;
+  gc.stats() bridges; arena bounds degrade to nil (OOB read/write,
+  double free) without host errors.
+- Remaining for Phase 8 on-board acceptance: `hello.sbc` running on
+  the board (bytecode vs. a `.sbc` container to be decided at that
+  point). With loader + memory + syscall + GC verified in the
+  interpreter, the interpreter-side milestone is complete.
+
 - `tests: 66 passed, 0 failed`; sgvm smoke covers compile by the
   installed sagevm binary, composed-VM execution in the interpreter,
   and the volume loader round-trip.
